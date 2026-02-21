@@ -1,66 +1,489 @@
+"use client";
+import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
-import styles from "./page.module.css";
+import logo from "./assets/logo.png";
+import {useRouter} from "next/navigation";
 
-export default function Home() {
+
+const mockUser = { name: "Ahmed Ashry", initials: "AA" };
+
+export default function LanguagesPage() {
+  const router = useRouter();
+  const [showModal, setShowModal] = useState(false);
+  const [langName, setLangName] = useState("");
+  const languagesTemp = ["Arabic", "English", "Spanish"];
+  const [languages, setLanguages] = useState(languagesTemp);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSave = () => {
+    if (langName.trim()) {
+      setLanguages((prev) => [...prev, langName.trim()]);// In a real app, you'd also update the backend here
+      setLangName("");
+      setShowModal(false);
+      router.push("/recording");
+    }
+  }
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.js file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div style={s.page}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'DM Sans', sans-serif; background: #f7f8fc; }
+        input::placeholder { color: #a0aec0; }
+        input:focus { outline: none; }
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(24px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .lang-card { animation: fadeUp 0.4s ease both; }
+        .lang-card:nth-child(2) { animation-delay: 0.07s; }
+        .lang-card:nth-child(3) { animation-delay: 0.14s; }
+        .add-data-btn:hover { background: #047857 !important; }
+        .add-lang-btn:hover { background: #0f3460 !important; transform: translateY(-1px); }
+        .save-btn:hover { background: #0f3460 !important; }
+        .logout-item:hover { background: #fff5f5 !important; color: #c0392b !important; }
+        .dropdown-item:hover { background: #f7f8fc !important; }
+        .close-btn:hover { background: #f0f0f0 !important; }
+      `}</style>
+
+      <nav style={s.nav}>
+        <div style={s.navBrand}>
+          <div ><Image src={logo} alt="Logo" width="50" height="50" /></div>
+          <span style={s.navName}>صوتك</span>
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        <div style={s.userArea} ref={dropdownRef}>
+          <button style={s.userPill} onClick={() => setDropdownOpen(o => !o)}>
+            <div style={s.avatar}>{mockUser.initials}</div>
+            <span style={s.userName}>{mockUser.name}</span>
+            <span style={{ color: '#a0aec0', fontSize: '11px', marginLeft: '4px' }}>
+              {dropdownOpen ? '▲' : '▼'}
+            </span>
+          </button>
+
+          {dropdownOpen && (
+            <div style={s.dropdown}>
+              <div style={s.dropdownHeader}>
+                <div style={{ ...s.avatar, width: '36px', height: '36px', fontSize: '13px' }}>{mockUser.initials}</div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a2e' }}>{mockUser.name}</div>
+                  <div style={{ fontSize: '11px', color: '#a0aec0' }}>alex@example.com</div>
+                </div>
+              </div>
+              <div style={s.dropdownDivider} />
+              <button onClick={() => router.push("/login")} className="logout-item" style={{ ...s.dropdownItem, color: '#e74c3c' }}>
+                Sign out →
+              </button>
+            </div>
+          )}
+        </div>
+      </nav>
+
+      {/* MAIN CONTENT */}
+      <main style={s.main}>
+        <div style={s.pageHeader}>
+          <div>
+            <h1 style={s.pageTitle}>Languages</h1>
+            <p style={s.pageSubtitle}>{languages.length} languages configured</p>
+          </div>
+          <button
+            className="add-lang-btn"
+            style={s.addBtn}
+            onClick={() => setShowModal(true)}
           >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            + Add Language
+          </button>
+        </div>
+
+        <div style={s.grid}>
+          {languages.map((lang, i) => (
+            <div key={lang} className="lang-card" style={s.card}>
+              <div style={s.cardAccent} />
+              <div style={s.cardIcon}>{lang.charAt(0)}</div>
+              <h2 style={s.cardTitle}>{lang}</h2>
+              <p style={s.cardMeta}>Language module</p>
+              <button onClick={() => router.push("/recording")} className="add-data-btn" style={s.addDataBtn}>
+                Add Data
+              </button>
+            </div>
+          ))}
         </div>
       </main>
+
+      {/* MODAL */}
+      {showModal && (
+        <div style={s.overlay} onClick={() => setShowModal(false)}>
+          <div style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div>
+                <h2 style={s.modalTitle}>Add Language</h2>
+                <p style={s.modalSub}>Enter the name of the new language</p>
+              </div>
+              <button
+                className="close-btn"
+                style={s.closeBtn}
+                onClick={() => setShowModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form style={s.form} onSubmit={e => e.preventDefault()}>
+              <div style={s.fieldGroup}>
+                <label style={s.label}>Language name</label>
+                <input
+                  placeholder="e.g. French"
+                  value={langName}
+                  onChange={e => setLangName(e.target.value)}
+                  style={s.input}
+                  onFocus={e => Object.assign(e.target.style, s.inputFocus)}
+                  onBlur={e => Object.assign(e.target.style, { borderColor: '#e2e8f0', boxShadow: 'none' })}
+                />
+              </div>
+              <button
+                className="save-btn"
+                style={s.saveBtn}
+                onClick={handleSave}
+              >
+                Save Language
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+const s = {
+  page: {
+    minHeight: '100vh',
+    background: '#f7f8fc',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+
+  /* NAV */
+  nav: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0 32px',
+    height: '64px',
+    background: '#ffffff',
+    borderBottom: '1px solid #edf0f7',
+    boxShadow: '0 1px 12px rgba(0,0,0,0.04)',
+    position: 'sticky',
+    top: 0,
+    zIndex: 10,
+  },
+  navBrand: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  logo: {
+    fontSize: '48px',
+    color: '#e2b96f',
+    marginBottom: '12px',
+    display: 'block',
+  },
+  navName: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: '30px',
+    fontWeight: 700,
+    color: '#06066a',
+    letterSpacing: '0.5px',
+  },
+
+  /* USER PILL */
+  userArea: {
+    position: 'relative',
+  },
+  userPill: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '6px 14px 6px 6px',
+    background: '#f7f8fc',
+    border: '1.5px solid #edf0f7',
+    borderRadius: '100px',
+    cursor: 'pointer',
+    transition: 'border-color 0.2s',
+  },
+  avatar: {
+    width: '30px',
+    height: '30px',
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #1a1a2e, #0f3460)',
+    color: '#e2b96f',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '11px',
+    fontWeight: 600,
+    letterSpacing: '0.5px',
+    flexShrink: 0,
+  },
+  userName: {
+    fontSize: '13.5px',
+    fontWeight: 500,
+    color: '#1a1a2e',
+  },
+
+  /* DROPDOWN */
+  dropdown: {
+    position: 'absolute',
+    top: 'calc(100% + 8px)',
+    right: 0,
+    background: '#ffffff',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+    border: '1px solid #edf0f7',
+    minWidth: '200px',
+    overflow: 'hidden',
+    animation: 'fadeIn 0.15s ease',
+    zIndex: 100,
+  },
+  dropdownHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '14px 16px',
+    background: '#fafbfc',
+  },
+  dropdownDivider: {
+    height: '1px',
+    background: '#edf0f7',
+    margin: '0',
+  },
+  dropdownItem: {
+    display: 'block',
+    width: '100%',
+    padding: '11px 16px',
+    background: 'transparent',
+    border: 'none',
+    textAlign: 'left',
+    fontSize: '13.5px',
+    color: '#4a5568',
+    cursor: 'pointer',
+    transition: 'background 0.15s, color 0.15s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+
+  /* MAIN */
+  main: {
+    padding: '40px 40px',
+    maxWidth: '1100px',
+    margin: '0 auto',
+  },
+  pageHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginBottom: '32px',
+  },
+  pageTitle: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: '32px',
+    fontWeight: 600,
+    color: '#1a1a2e',
+    marginBottom: '4px',
+  },
+  pageSubtitle: {
+    fontSize: '14px',
+    color: '#a0aec0',
+    fontWeight: 300,
+  },
+  addBtn: {
+    padding: '12px 22px',
+    background: '#1a1a2e',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    letterSpacing: '0.3px',
+    transition: 'background 0.2s, transform 0.15s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+
+  /* GRID */
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+    gap: '24px',
+  },
+  card: {
+    background: '#ffffff',
+    borderRadius: '20px',
+    padding: '28px',
+    boxShadow: '0 2px 16px rgba(0,0,0,0.05)',
+    position: 'relative',
+    overflow: 'hidden',
+    border: '1px solid #edf0f7',
+  },
+  cardAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '3px',
+    background: 'linear-gradient(90deg, #1a1a2e, #e2b96f)',
+  },
+  cardIcon: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '12px',
+    background: 'linear-gradient(135deg, #1a1a2e, #0f3460)',
+    color: '#e2b96f',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '18px',
+    fontWeight: 700,
+    marginBottom: '16px',
+    fontFamily: "'Playfair Display', serif",
+  },
+  cardTitle: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: '20px',
+    fontWeight: 600,
+    color: '#1a1a2e',
+    marginBottom: '6px',
+  },
+  cardMeta: {
+    fontSize: '12.5px',
+    color: '#a0aec0',
+    fontWeight: 300,
+    marginBottom: '20px',
+  },
+  addDataBtn: {
+    padding: '10px 18px',
+    background: '#059669',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '10px',
+    fontSize: '13.5px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+
+  /* MODAL */
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(10,10,20,0.45)',
+    backdropFilter: 'blur(6px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+    animation: 'fadeIn 0.2s ease',
+  },
+  modal: {
+    background: '#ffffff',
+    borderRadius: '24px',
+    width: '100%',
+    maxWidth: '400px',
+    padding: '32px',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+    animation: 'slideUp 0.3s ease',
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: '28px',
+  },
+  modalTitle: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: '22px',
+    fontWeight: 600,
+    color: '#1a1a2e',
+    marginBottom: '4px',
+  },
+  modalSub: {
+    fontSize: '13px',
+    color: '#a0aec0',
+    fontWeight: 300,
+  },
+  closeBtn: {
+    width: '34px',
+    height: '34px',
+    borderRadius: '50%',
+    border: 'none',
+    background: '#f7f8fc',
+    cursor: 'pointer',
+    fontSize: '13px',
+    color: '#7a8499',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'background 0.2s',
+    flexShrink: 0,
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '20px',
+  },
+  fieldGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  label: {
+    fontSize: '13px',
+    fontWeight: 500,
+    color: '#4a5568',
+    letterSpacing: '0.3px',
+  },
+  input: {
+    padding: '13px 16px',
+    borderRadius: '12px',
+    border: '1.5px solid #e2e8f0',
+    fontSize: '14px',
+    color: '#1a202c',
+    background: '#fafbfc',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+  inputFocus: {
+    borderColor: '#0f3460',
+    boxShadow: '0 0 0 3px rgba(15,52,96,0.08)',
+  },
+  saveBtn: {
+    padding: '14px',
+    background: '#1a1a2e',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '14.5px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+};
