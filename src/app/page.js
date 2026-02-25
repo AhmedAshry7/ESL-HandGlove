@@ -34,6 +34,20 @@ export default function LanguagesPage() {
       router.push("/recording");
     }
   }
+
+  const handleDelete = (lang) => {
+    const confirmDelete = confirm(
+      `Are you sure you want to delete ${lang}?`
+    );
+
+    if (!confirmDelete) return;
+
+    alert("Delete language request sent to backend (mock)");
+
+    // Later:
+    // await fetch(`/api/languages/${lang}`, { method: "DELETE" })
+  };
+
   return (
     <div style={s.page}>
       <style>{`
@@ -54,13 +68,15 @@ export default function LanguagesPage() {
           from { opacity: 0; transform: translateY(24px) scale(0.97); }
           to   { opacity: 1; transform: translateY(0) scale(1); }
         }
-        .lang-card { animation: fadeUp 0.4s ease both; }
+        .lang-card { animation: fadeUp 0.4s ease both; cursor: pointer; transition: 0.2s ease; }
+        .lang-card:hover { transform: translateY(-6px); box-shadow: 0 15px 30px rgba(0,0,0,0.2) !important; }
         .lang-card:nth-child(2) { animation-delay: 0.07s; }
         .lang-card:nth-child(3) { animation-delay: 0.14s; }
         .add-data-btn:hover { background: #047857 !important; }
         .add-lang-btn:hover { background: #0f3460 !important; transform: translateY(-1px); }
         .save-btn:hover { background: #0f3460 !important; }
         .logout-item:hover { background: #fff5f5 !important; color: #c0392b !important; }
+        .delete-data-btn:hover { background: #ba1a08 !important; }
         .dropdown-item:hover { background: #f7f8fc !important; }
         .close-btn:hover { background: #f0f0f0 !important; }
       `}</style>
@@ -90,6 +106,8 @@ export default function LanguagesPage() {
                 </div>
               </div>
               <div style={s.dropdownDivider} />
+              <button onClick={() => router.push("/models")} className="dropdown-item" style={s.dropdownItem}>Models</button>
+              <div style={s.dropdownDivider} />
               <button onClick={() => router.push("/login")} className="logout-item" style={{ ...s.dropdownItem, color: '#e74c3c' }}>
                 Sign out →
               </button>
@@ -102,28 +120,40 @@ export default function LanguagesPage() {
       <main style={s.main}>
         <div style={s.pageHeader}>
           <div>
-            <h1 style={s.pageTitle}>Languages</h1>
-            <p style={s.pageSubtitle}>{languages.length} languages configured</p>
+            <h1 style={s.pageTitle}>Datasets</h1>
+            <p style={s.pageSubtitle}>{languages.length} Datasets configured</p>
           </div>
           <button
             className="add-lang-btn"
             style={s.addBtn}
             onClick={() => setShowModal(true)}
           >
-            + Add Language
+            + Add Dataset
           </button>
         </div>
 
         <div style={s.grid}>
           {languages.map((lang, i) => (
-            <div key={lang} className="lang-card" style={s.card}>
+            <div key={lang} className="lang-card" style={{ ...s.card, ...s.cardHover }} onClick={() => router.push(`/languages/${lang}`)}>
               <div style={s.cardAccent} />
               <div style={s.cardIcon}>{lang.charAt(0)}</div>
               <h2 style={s.cardTitle}>{lang}</h2>
-              <p style={s.cardMeta}>Language module</p>
-              <button onClick={() => router.push("/recording")} className="add-data-btn" style={s.addDataBtn}>
-                Add Data
-              </button>
+              <p style={s.cardMeta}>Dataset module</p>
+              <div style={s.cardButtons}>
+                <button onClick={(e) => { e.stopPropagation(); router.push("/recording"); }} className="add-data-btn" style={s.addDataBtn}>
+                  Upload Data
+                </button>
+                <button
+                    className="delete-data-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(lang);
+                    }}
+                    style={s.deleteBtn}
+                  >
+                    Delete
+                  </button>
+                </div>
             </div>
           ))}
         </div>
@@ -135,8 +165,8 @@ export default function LanguagesPage() {
           <div style={s.modal} onClick={e => e.stopPropagation()}>
             <div style={s.modalHeader}>
               <div>
-                <h2 style={s.modalTitle}>Add Language</h2>
-                <p style={s.modalSub}>Enter the name of the new language</p>
+                <h2 style={s.modalTitle}>Add Dataset</h2>
+                <p style={s.modalSub}>Enter the name of the new Dataset</p>
               </div>
               <button
                 className="close-btn"
@@ -149,7 +179,7 @@ export default function LanguagesPage() {
 
             <form style={s.form} onSubmit={e => e.preventDefault()}>
               <div style={s.fieldGroup}>
-                <label style={s.label}>Language name</label>
+                <label style={s.label}>Dataset name</label>
                 <input
                   placeholder="e.g. French"
                   value={langName}
@@ -164,7 +194,7 @@ export default function LanguagesPage() {
                 style={s.saveBtn}
                 onClick={handleSave}
               >
-                Save Language
+                Save Dataset
               </button>
             </form>
           </div>
@@ -287,6 +317,32 @@ const s = {
     cursor: 'pointer',
     transition: 'background 0.15s, color 0.15s',
     fontFamily: "'DM Sans', sans-serif",
+  },
+
+  card: {
+  cursor: 'pointer',
+  transition: '0.2s ease',
+  },
+
+  cardHover: {
+    transform: 'translateY(-4px)',
+  },
+
+  deleteBtn: {
+    backgroundColor: "#dc2626",
+    color: "white",
+    border: "none",
+    padding: "8px 12px",
+    borderRadius: "6px",
+    cursor: "pointer",
+    transition: 'background 0.2s, transform 0.15s',
+  },
+
+  cardButtons: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    marginTop: "12px"
   },
 
   /* MAIN */
