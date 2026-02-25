@@ -19,15 +19,29 @@ export default function GloveCapture() {
   const socketRef = useRef(null);
   const dropdownRef = useRef(null);
 
+  // Change this line in your useEffect in app/page.js
   useEffect(() => {
-    socketRef.current = new WebSocket('ws://localhost:8080');
+    // REPLACE '192.168.X.X' with the actual IP from the Serial Monitor
+    const GLOVE_IP = "192.168.0.71"; // Example IP
+    socketRef.current = new WebSocket(`ws://${GLOVE_IP}:81`);
+    
     socketRef.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setCurrentFrame(data);
-      if (isRecording) {
-        setRecordings((prev) => [...prev, data]);
+      try {
+        const rawData = JSON.parse(event.data);
+        
+        // The ESP32 sends: { "fingers": { "index": { "pitch": 25.4, ... }, ... } }
+        if (rawData.fingers) {
+          setCurrentFrame(rawData.fingers); // We save just the fingers object
+          
+          if (isRecording) {
+            setRecordings((prev) => [...prev, rawData.fingers]);
+          }
+        }
+      } catch (err) {
+        console.error("Error parsing glove data:", err);
       }
     };
+
     return () => socketRef.current.close();
   }, [isRecording]);
 
@@ -104,6 +118,8 @@ export default function GloveCapture() {
               </div>
               <div style={s.ddDivider} />
               <button onClick={() => router.push("/")} className="dd-item" style={s.ddItem}>Home</button>
+              <div style={s.ddDivider} />
+              <button onClick={() => router.push("/models")} className="dd-item" style={s.ddItem}>Models</button>
               <div style={s.ddDivider} />
               <button onClick={() => router.push("/login")} className="logout-item" style={{ ...s.ddItem, color: '#ef4444' }}>Sign out →</button>
             </div>
@@ -265,13 +281,23 @@ export default function GloveCapture() {
                 <h3 style={s.panelTitle}>Live Sensor Data</h3>
               </div>
               <div style={s.sensorGrid}>
-                {Object.entries(currentFrame).map(([key, val]) => (
-                  <div key={key} style={s.sensorRow}>
-                    <span style={s.sensorKey}>{key}</span>
-                    <div style={s.sensorBarBg}>
-                      <div style={{ ...s.sensorBarFill, width: `${(val / 1023) * 100}%` }} />
+                {Object.entries(currentFrame).map(([key, fingerObj]) => (
+                  <div key={key} style={{...s.sensorRow, flexDirection: 'column', alignItems: 'flex-start', gap: '2px', marginBottom: '8px'}}>
+                    <span style={{...s.sensorKey, fontWeight: 'bold', color: '#fff'}}>{key}</span>
+                    
+                    {/* Show Pitch or W-Quaternion as a representative number for the bar */}
+                    <div style={s.sensorRow}>
+                      <div style={s.sensorBarBg}>
+                        <div style={{ 
+                          ...s.sensorBarFill, 
+                          width: `${Math.abs(fingerObj.pitch || fingerObj.qw || 0)}%` 
+                        }} />
+                      </div>
+                      <span style={s.sensorVal}>
+                        {/* Displaying just the pitch or first quaternion value so it doesn't crash */}
+                        {fingerObj.pitch !== undefined ? fingerObj.pitch.toFixed(1) : fingerObj.qw?.toFixed(2)}
+                      </span>
                     </div>
-                    <span style={s.sensorVal}>{val}</span>
                   </div>
                 ))}
               </div>
