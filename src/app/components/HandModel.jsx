@@ -15,37 +15,20 @@ export function HandModel({ sensorData, ...props }) {
   useFrame(() => {
     if (!sensorData || !nodes) return;
 
-    // Maps sensor value (0–1023) → rotation in radians (0 to –1.5 rad ≈ 90°)
-    const getRot = (val) => (val * -1.5) / 1023;
+    const applyQuaternion = (nodeName, fingerKey) => {
+      const data = sensorData[fingerKey];
+      if (nodes[nodeName] && data && data.qw !== undefined) {
+        // Apply the quaternion rotation (w, x, y, z)
+        nodes[nodeName].quaternion.set(data.qx, data.qy, data.qz, data.qw);
+      }
+    };
 
-    // Index
-    if (nodes.index_01R_017) {
-      nodes.index_01R_017.rotation.z = getRot(sensorData.index);
-      if (nodes.index_02R_018) nodes.index_02R_018.rotation.z = getRot(sensorData.index) * 0.5;
-    }
-
-    // Middle
-    if (nodes.middle_01R_025) {
-      nodes.middle_01R_025.rotation.z = getRot(sensorData.middle);
-      if (nodes.middle_02R_026) nodes.middle_02R_026.rotation.z = getRot(sensorData.middle) * 0.5;
-    }
-
-    // Thumb
-    if (nodes.thumb_01R_08) {
-      nodes.thumb_01R_08.rotation.z = getRot(sensorData.thumb);
-    }
-
-    // Ring
-    if (nodes.ring_01R_033) {
-      nodes.ring_01R_033.rotation.z = getRot(sensorData.ring);
-      if (nodes.ring_02R_034) nodes.ring_02R_034.rotation.z = getRot(sensorData.ring) * 0.5;
-    }
-
-    // Pinky
-    if (nodes.pinky_01R_041) {
-      nodes.pinky_01R_041.rotation.z = getRot(sensorData.pinky);
-      if (nodes.pinky_02R_042) nodes.pinky_02R_042.rotation.z = getRot(sensorData.pinky) * 0.5;
-    }
+    applyQuaternion('index_01R_017', 'index');
+    applyQuaternion('middle_01R_025', 'middle');
+    applyQuaternion('ring_01R_033', 'ring');
+    applyQuaternion('pinky_01R_041', 'pinky');
+    applyQuaternion('thumb_01R_08', 'thumb');
+    // ... repeat for others
   });
 
   return (
