@@ -10,11 +10,41 @@ const mockUser = { name: "Ahmed Ashry", initials: "AA" };
 export default function ModelsPage() {
   const router = useRouter();
   const [showModal, setShowModal] = useState(false);
+  const [showTrainModal, setShowTrainModal] = useState(false);
   const [modelName, setModelName] = useState("");
-  const modelsTemp = [{id:1, name:"ESL.0"}, {id:2, name:"ESL.2.1"}, {id:3, name:"ESL.3"}];
+  const modelsTemp = [{id:1, name:"ESL.0",language:"Arabic"}, {id:2, name:"ESL.2.1",language:"English"}, {id:3, name:"ESL.3",language:"French"}];
   const [models, setModels] = useState(modelsTemp);
+  const [selectedLang, setSelectedLang] = useState("");
+  const [pickleFile, setPickleFile] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const [trainFiles, setTrainFiles] = useState(null);
+  const [trainModelName, setTrainModelName] = useState(""); // Keeping for consistency/logic
+
+  const handleTrainSubmit = () => {
+    if (!trainModelName.trim() || !trainFiles || trainFiles.length === 0) {
+      alert("Please provide a model name and select a training data folder.");
+      return;
+    }
+
+    // In the future, this is where you'd send the files to your Python script
+    console.log(`Training "${trainModelName}" with ${trainFiles.length} files.`);
+    
+    const newModel = {
+      id: Date.now(),
+      name: trainModelName.trim(),
+      language: "Custom",
+      status: "Training...", // Useful to show a different state in the list
+      fileCount: trainFiles.length
+    };
+
+    setModels((prev) => [...prev, newModel]);
+    
+    // Cleanup
+    setTrainModelName("");
+    setTrainFiles(null);
+    setShowTrainModal(false);
+  };
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -27,13 +57,27 @@ export default function ModelsPage() {
   }, []);
 
   const handleSave = () => {
-    if (modelName.trim()) {
-      setModels((prev) => [...prev, modelName.trim()]);// In a real app, you'd also update the backend here
-      setModelName("");
-      setShowModal(false);
-      router.push("/recording");
+    // Validation: Ensure all fields are filled
+    if (!modelName.trim() || !selectedLang || !pickleFile) {
+      alert("Please provide a name, select a language, and upload a file.");
+      return;
     }
-  }
+
+    const newModel = {
+      id: Date.now(), // Unique key for React
+      name: modelName.trim(),
+      language: selectedLang,
+      fileName: pickleFile.name, // Storing the name for display
+    };
+
+    setModels((prev) => [...prev, newModel]);
+
+    // Reset all fields and close
+    setModelName("");
+    setSelectedLang("");
+    setPickleFile(null);
+    setShowModal(false);
+  };
   return (
     <div style={s.page}>
       <style>{`
@@ -54,8 +98,7 @@ export default function ModelsPage() {
           from { opacity: 0; transform: translateY(24px) scale(0.97); }
           to   { opacity: 1; transform: translateY(0) scale(1); }
         }
-        .lang-card { animation: fadeUp 0.4s ease both; cursor: pointer; transition: 0.2s ease; }
-        .lang-card:hover { transform: translateY(-6px); box-shadow: 0 15px 30px rgba(0,0,0,0.2) !important; }
+        .lang-card { animation: fadeUp 0.4s ease both; transition: 0.2s ease; }
         .lang-card:nth-child(2) { animation-delay: 0.07s; }
         .lang-card:nth-child(3) { animation-delay: 0.14s; }
         .add-data-btn:hover { background: #047857 !important; }
@@ -120,7 +163,7 @@ export default function ModelsPage() {
             <button
               className="add-lang-btn"
               style={s.addBtn}
-              onClick={() => setShowModal(true)}
+              onClick={() => setShowTrainModal(true)}
             >
               + Train new Model
             </button>
@@ -129,11 +172,13 @@ export default function ModelsPage() {
 
         <div style={s.grid}>
           {models.map((model, i) => (
-            <div key={model.name} className="lang-card" style={{ ...s.card, ...s.cardHover }} onClick={() => router.push(`/models/${model.name}`)}>
+            <div key={model.id || `${model.name}-${i}`} className="lang-card" style={{ ...s.card, ...s.cardHover }}>
               <div style={s.cardAccent} />
-              <div style={s.cardIcon}>{model.name.charAt(0)}</div>
+              <div style={s.cardIcon}>
+                {model.name ? model.name.charAt(0) : "M"} 
+              </div>
               <h2 style={s.cardTitle}>{model.name}</h2>
-              <p style={s.cardMeta}>Moded module</p>
+              <p style={s.cardMeta}>{model.language}</p>
               <div style={s.cardButtons}>
                 <button onClick={(e) => { e.stopPropagation(); router.push(`/models/${model.name}`); }} className="add-data-btn" style={s.addDataBtn}>
                   Fine tune
@@ -160,36 +205,140 @@ export default function ModelsPage() {
           <div style={s.modal} onClick={e => e.stopPropagation()}>
             <div style={s.modalHeader}>
               <div>
-                <h2 style={s.modalTitle}>Upload model</h2>
-                <p style={s.modalSub}>Enter the name of the new Model</p>
+                <h2 style={s.modalTitle}>Upload Model</h2>
+                <p style={s.modalSub}>Configure your model details and upload the pickle file.</p>
               </div>
-              <button
-                className="close-btn"
-                style={s.closeBtn}
-                onClick={() => setShowModal(false)}
-              >
-                ✕
-              </button>
+              <button style={s.closeBtn} onClick={() => {setModelName(""); setSelectedLang(""); setPickleFile(null); setShowModal(false);}}>✕</button>
             </div>
 
             <form style={s.form} onSubmit={e => e.preventDefault()}>
+              {/* Model Name */}
               <div style={s.fieldGroup}>
-                <label style={s.label}>Model name</label>
+                <label style={s.label}>Model Name</label>
                 <input
-                  placeholder="e.g. French"
+                  placeholder="e.g. Arabic-v1"
                   value={modelName}
                   onChange={e => setModelName(e.target.value)}
                   style={s.input}
-                  onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                  onBlur={e => Object.assign(e.target.style, { borderColor: '#e2e8f0', boxShadow: 'none' })}
                 />
               </div>
+
+              {/* Language Selection */}
+              <div style={s.fieldGroup}>
+                <label style={s.label}>Language</label>
+                <select 
+                  value={selectedLang} 
+                  onChange={e => setSelectedLang(e.target.value)}
+                  style={{...s.input, appearance: 'none', background: '#fff'}}
+                >
+                  <option value="" disabled>Select a language</option>
+                  <option value="Arabic">Arabic</option>
+                  <option value="English">English</option>
+                  <option value="French">French</option>
+                  {/* Add more options as needed */}
+                </select>
+              </div>
+
+              {/* File Upload */}
+              <div style={s.fieldGroup}>
+                <label style={s.label}>Pickle File (.pkl)</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="file"
+                    accept=".pkl,.pickle"
+                    onChange={(e) => setPickleFile(e.target.files)}
+                    style={{
+                      ...s.input,
+                      paddingTop: '8px',
+                      cursor: 'pointer'
+                    }}
+                  />
+                </div>
+                {pickleFile && (
+                  <p style={{ fontSize: '12px', color: '#10b981', marginTop: '4px' }}>
+                    ✓ Selected: {pickleFile.name}
+                  </p>
+                )}
+              </div>
+
               <button
                 className="save-btn"
-                style={s.saveBtn}
+                style={{
+                  ...s.saveBtn,
+                  opacity: (!modelName.trim() || !selectedLang || !pickleFile) ? 0.6 : 1,
+                  cursor: (!modelName.trim() || !selectedLang || !pickleFile) ? 'not-allowed' : 'pointer'
+                }}
                 onClick={handleSave}
+                disabled={!modelName.trim() || !selectedLang || !pickleFile}
               >
-                Upload Model
+                Upload & Save
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* TRAINING MODAL */}
+      {showTrainModal && (
+        <div style={s.overlay} onClick={() => setShowTrainModal(false)}>
+          <div style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div>
+                <h2 style={s.modalTitle}>Train New Model</h2>
+                <p style={s.modalSub}>Select the directory containing your labeled training data.</p>
+              </div>
+              <button style={s.closeBtn} onClick={() => {setModelName(""); setShowTrainModal(false);}}>✕</button>
+            </div>
+
+            <form style={s.form} onSubmit={e => e.preventDefault()}>
+              {/* Model Name */}
+              <div style={s.fieldGroup}>
+                <label style={s.label}>Model Name</label>
+                <input
+                  placeholder="e.g. Arabic-Sign-v1"
+                  value={modelName}
+                  onChange={e => setModelName(e.target.value)}
+                  style={s.input}
+                />
+              </div>
+
+              {/* Folder Upload */}
+              <div style={s.fieldGroup}>
+                <label style={s.label}>Training Data Directory</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="file"
+                    /* These three attributes enable folder selection */
+                    webkitdirectory="true"
+                    directory="true"
+                    multiple
+                    onChange={(e) => setTrainFiles(e.target.files)}
+                    style={{
+                      ...s.input,
+                      paddingTop: '8px',
+                      cursor: 'pointer'
+                    }}
+                  />
+                </div>
+                {trainFiles && (
+                  <p style={{ fontSize: '12px', color: '#10b981', marginTop: '4px' }}>
+                    ✓ Folder linked: {trainFiles.length} files detected
+                  </p>
+                )}
+              </div>
+
+              <button
+                className="save-btn"
+                style={{
+                  ...s.saveBtn,
+                  // Updated validation check
+                  opacity: (!modelName.trim() || !trainFiles) ? 0.6 : 1,
+                  cursor: (!modelName.trim() || !trainFiles) ? 'not-allowed' : 'pointer',
+                  backgroundColor: '#6366f1' // Different color to distinguish "Train" from "Save"
+                }}
+                onClick={handleTrainSubmit}
+                disabled={!modelName.trim() || !trainFiles}
+              >
+                Start Training
               </button>
             </form>
           </div>
