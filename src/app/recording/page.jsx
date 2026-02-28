@@ -1,71 +1,274 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { HandModel } from "../components/HandModel";
 import Image from "next/image";
 import logo from "../assets/logo.png";
-import {useRouter} from "next/navigation";
+import { useRouter } from "next/navigation";
 
 const mockUser = { name: "Ahmed Ashry", initials: "AA" };
 
+// ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
+function Scene({ sensorData, calibrate }) {
+  return (
+    <Canvas camera={{ position: [0, 0, 5] }} style={{ width: '100%', height: '100%' }}>
+      <ambientLight intensity={0.6} />
+      <pointLight position={[10, 10, 10]} intensity={1.2} />
+      <pointLight position={[-10, -5, -10]} intensity={0.4} color="#e2b96f" />
+      <HandModel sensorData={sensorData} calibrate={calibrate} />
+    </Canvas>
+  );
+}
+
+// ─── Recording modal ──────────────────────────────────────────────────────────
+function RecordingModal({
+  signLabel,
+  isRecording,
+  frames,
+  trimRange,
+  setTrimRange,
+  onStop,
+  onDiscard,
+  onSave,
+  currentFrame,
+  calibrate,
+}) {
+  const frameCount = frames.length;
+  const duration   = (frameCount / 60).toFixed(1);
+  const trimStart  = trimRange[0];
+  const trimEnd    = trimRange[1];
+  const trimmedCount = Math.max(0, Math.floor(((trimEnd - trimStart) / 100) * frameCount));
+
+  // Playback of recorded frames when stopped
+  const [playbackFrame, setPlaybackFrame] = useState(null);
+  const playbackRef = useRef(null);
+
+  useEffect(() => {
+    if (!isRecording && frames.length > 0) {
+      // Loop playback over trimmed range
+      let idx = Math.floor((trimStart / 100) * frames.length);
+      const endIdx = Math.floor((trimEnd / 100) * frames.length);
+      playbackRef.current = setInterval(() => {
+        setPlaybackFrame(frames[idx]);
+        idx++;
+        if (idx >= endIdx) idx = Math.floor((trimStart / 100) * frames.length);
+      }, 1000 / 30); // 30fps playback
+    }
+    return () => clearInterval(playbackRef.current);
+  }, [isRecording, frames, trimStart, trimEnd]);
+
+  const displayFrame = isRecording ? currentFrame : playbackFrame;
+
+  return (
+    <div style={rm.overlay}>
+      <div style={rm.modal}>
+        {/* Header */}
+        <div style={rm.header}>
+          <div style={rm.headerLeft}>
+            <div style={rm.signChip}>
+              <span style={rm.signChipIcon}>✋</span>
+              <span style={rm.signChipText}>{signLabel}</span>
+            </div>
+            {isRecording
+              ? <div style={rm.recBadge}><span className="rec-dot" style={rm.recDot} /> REC · {frameCount} frames</div>
+              : <div style={rm.playBadge}>▶ Playback loop · {frameCount} frames captured</div>
+            }
+          </div>
+          <div style={rm.headerRight}>
+            <span style={rm.durationLabel}>{duration}s</span>
+          </div>
+        </div>
+
+        {/* Viewport */}
+        <div style={rm.viewport}>
+          <div style={rm.vpLabel}>
+            {isRecording ? 'LIVE CAPTURE' : 'PLAYBACK PREVIEW'}
+          </div>
+          <Scene sensorData={displayFrame} calibrate={calibrate} />
+          {!displayFrame && (
+            <div style={rm.vpOverlay}>
+              <div style={{ fontSize: 40, opacity: 0.3, marginBottom: 12 }}>🧤</div>
+              <p style={{ fontSize: 13, color: '#4a5568' }}>Waiting for glove connection…</p>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom controls — changes depending on state */}
+        {isRecording ? (
+          <div style={rm.controls}>
+            <div style={rm.controlHint}>Perform the sign now — recording in progress</div>
+            <button className="stop-modal-btn" style={rm.stopBtn} onClick={onStop}>
+              ■ Stop Recording
+            </button>
+          </div>
+        ) : (
+          <div style={rm.trimSection}>
+            {/* Trim sliders */}
+            <div style={rm.trimHeader}>
+              <h3 style={rm.trimTitle}>Trim Sign</h3>
+              <span style={rm.trimMeta}>{trimmedCount} frames selected</span>
+            </div>
+
+            <div style={rm.sliders}>
+              <div style={rm.sliderGroup}>
+                <div style={rm.sliderRow}>
+                  <label style={rm.sliderLabel}>Start</label>
+                  <span style={rm.sliderVal}>{trimStart}%</span>
+                </div>
+                <input type="range" min="0" max="100" value={trimStart} style={{ width: '100%' }}
+                  onChange={e => setTrimRange([parseInt(e.target.value), trimEnd])} />
+              </div>
+              <div style={rm.sliderGroup}>
+                <div style={rm.sliderRow}>
+                  <label style={rm.sliderLabel}>End</label>
+                  <span style={rm.sliderVal}>{trimEnd}%</span>
+                </div>
+                <input type="range" min="0" max="100" value={trimEnd} style={{ width: '100%' }}
+                  onChange={e => setTrimRange([trimStart, parseInt(e.target.value)])} />
+              </div>
+
+              {/* Visual trim bar */}
+              <div style={rm.trimBar}>
+                <div style={{ ...rm.trimFill, left: `${trimStart}%`, width: `${trimEnd - trimStart}%` }} />
+              </div>
+            </div>
+
+            <div style={rm.actionRow}>
+              <button className="discard-btn" style={rm.discardBtn} onClick={onDiscard}>
+                ✕ Discard
+              </button>
+              <button className="save-sign-btn" style={rm.saveSignBtn} onClick={onSave}>
+                ✓ Save Sign
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function GloveCapture() {
   const router = useRouter();
-  const [recordings, setRecordings] = useState([]);
-  const [isRecording, setIsRecording] = useState(false);
-  const [currentFrame, setCurrentFrame] = useState(null);
-  const [trimRange, setTrimRange] = useState([0, 100]);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null); // null | 'success' | 'error'
-  const socketRef = useRef(null);
-  const dropdownRef = useRef(null);
 
-  // Change this line in your useEffect in app/page.js
+  // WebSocket & live frame
+  const socketRef    = useRef(null);
+  const [currentFrame, setCurrentFrame] = useState(null);
+
+  // Calibration ref – set to true to trigger reset inside HandModel
+  const calibrateRef = useRef(false);
+
+  // Recording state
+  const [isRecording, setIsRecording]     = useState(false);
+  const [recordedFrames, setRecordedFrames] = useState([]);
+  const isRecordingRef = useRef(false); // mirrors state for use inside WS closure
+
+  // Modal state
+  const [modalOpen, setModalOpen]     = useState(false);
+  const [signLabel, setSignLabel]     = useState('');
+  const [signInput, setSignInput]     = useState('');
+  const [trimRange, setTrimRange]     = useState([0, 100]);
+
+  // Saved signs (one submission = many signs)
+  const [signs, setSigns]             = useState([]); // [{label, frames, trimStart, trimEnd}]
+  const [uploadStatus, setUploadStatus] = useState(null);
+
+  // Nav dropdown
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef  = useRef(null);
+
+  // Stats
+  const frameCount = recordedFrames.length;
+  const duration   = (frameCount / 60).toFixed(1);
+
+  // ── WebSocket ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    // REPLACE '192.168.X.X' with the actual IP from the Serial Monitor
-    const GLOVE_IP = "192.168.0.71"; // Example IP
+    const GLOVE_IP = "192.168.0.71";
     socketRef.current = new WebSocket(`ws://${GLOVE_IP}:81`);
-    
+
     socketRef.current.onmessage = (event) => {
       try {
-        const rawData = JSON.parse(event.data);
-        
-        // The ESP32 sends: { "fingers": { "index": { "pitch": 25.4, ... }, ... } }
-        if (rawData.fingers) {
-          setCurrentFrame(rawData.fingers); // We save just the fingers object
-          
-          if (isRecording) {
-            setRecordings((prev) => [...prev, rawData.fingers]);
+        const raw = JSON.parse(event.data);
+        if (raw.fingers) {
+          setCurrentFrame(raw.fingers);
+          if (isRecordingRef.current) {
+            setRecordedFrames(prev => [...prev, raw.fingers]);
           }
         }
       } catch (err) {
-        console.error("Error parsing glove data:", err);
+        console.error("WS parse error:", err);
       }
     };
 
-    return () => socketRef.current.close();
-  }, [isRecording]);
+    return () => socketRef.current?.close();
+  }, []); // single mount – isRecordingRef handles the flag
 
+  // Keep ref in sync with state
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+
+  // ── Dropdown outside click ─────────────────────────────────────────────────
   useEffect(() => {
-    function handleClickOutside(e) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+    function handler(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
         setDropdownOpen(false);
-      }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handleSave = () => {
-    const startIdx = Math.floor((trimRange[0] / 100) * recordings.length);
-    const endIdx = Math.floor((trimRange[1] / 100) * recordings.length);
-    const cleanedData = recordings.slice(startIdx, endIdx);
-    console.log("Saving Cleaned Data:", cleanedData);
-    setUploadStatus('success');
-    setTimeout(() => setUploadStatus(null), 3000);
+  // ── Recording flow ─────────────────────────────────────────────────────────
+  const handleStartRecording = () => {
+    if (!signInput.trim()) return;
+    setSignLabel(signInput.trim());
+    setRecordedFrames([]);
+    setTrimRange([0, 100]);
+    setIsRecording(true);
+    setModalOpen(true);
   };
 
-  const frameCount = recordings.length;
-  const duration = (frameCount / 60).toFixed(1); // rough estimate at 60fps
+  const handleStopRecording = () => {
+    setIsRecording(false);
+    // Modal stays open for trim/review
+  };
+
+  const handleDiscardSign = () => {
+    setModalOpen(false);
+    setIsRecording(false);
+    setRecordedFrames([]);
+    setSignInput('');
+  };
+
+  const handleSaveSign = () => {
+    const startIdx = Math.floor((trimRange[0] / 100) * recordedFrames.length);
+    const endIdx   = Math.floor((trimRange[1] / 100) * recordedFrames.length);
+    const trimmedFrames = recordedFrames.slice(startIdx, endIdx);
+
+    setSigns(prev => [...prev, {
+      label: signLabel,
+      frames: trimmedFrames,
+      trimStart: trimRange[0],
+      trimEnd: trimRange[1],
+    }]);
+
+    setModalOpen(false);
+    setIsRecording(false);
+    setRecordedFrames([]);
+    setSignInput('');
+  };
+
+  const handleUpload = () => {
+    if (signs.length === 0) return;
+    console.log("Uploading submission:", signs);
+    // await fetch('/api/submissions', { method: 'POST', body: JSON.stringify({ signs }) })
+    setUploadStatus('success');
+    setTimeout(() => setUploadStatus(null), 3000);
+    setSigns([]);
+  };
+
+  const handleRemoveSign = (idx) => {
+    setSigns(prev => prev.filter((_, i) => i !== idx));
+  };
 
   return (
     <div style={s.page}>
@@ -73,52 +276,52 @@ export default function GloveCapture() {
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'DM Sans', sans-serif; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-        @keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn  { from { opacity:0 } to { opacity:1 } }
+        @keyframes fadeUp  { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
+        @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes slideDown { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes slideUp   { from{opacity:0;transform:translateY(20px) scale(0.97)} to{opacity:1;transform:translateY(0) scale(1)} }
         .rec-dot { animation: pulse 1.2s ease-in-out infinite; }
-        .start-btn:hover { background: #b91c1c !important; transform: translateY(-1px); }
-        .stop-btn:hover { background: #374151 !important; transform: translateY(-1px); }
-        .upload-btn:hover { background: #0f3460 !important; transform: translateY(-1px); }
-        .logout-item:hover { background: rgba(220,38,38,0.08) !important; color: #ef4444 !important; }
-        .dd-item:hover { background: rgba(255,255,255,0.05) !important; }
-
-        /* Custom range slider */
-        input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 4px; background: #2d3748; outline: none; cursor: pointer; }
-        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #e2b96f; border: 2px solid #1a1a2e; cursor: pointer; transition: transform 0.15s; }
-        input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
-        input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #e2b96f; border: 2px solid #1a1a2e; cursor: pointer; }
+        .start-btn:hover     { background:#b91c1c !important; transform:translateY(-1px); }
+        .calib-btn:hover     { background:rgba(226,185,111,0.15) !important; transform:translateY(-1px); }
+        .upload-btn:hover    { background:#0f3460 !important; transform:translateY(-1px); }
+        .stop-modal-btn:hover{ background:#991b1b !important; transform:translateY(-1px); }
+        .save-sign-btn:hover { background:#047857 !important; transform:translateY(-1px); }
+        .discard-btn:hover   { background:rgba(239,68,68,0.15) !important; color:#ef4444 !important; }
+        .logout-item:hover   { background:rgba(220,38,38,0.08) !important; color:#ef4444 !important; }
+        .dd-item:hover       { background:rgba(255,255,255,0.05) !important; }
+        .sign-tag:hover .remove-sign { opacity:1 !important; }
+        input[type=range] { -webkit-appearance:none; appearance:none; height:4px; border-radius:4px; background:#2d3748; outline:none; cursor:pointer; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:#e2b96f; border:2px solid #1a1a2e; cursor:pointer; transition:transform 0.15s; }
+        input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
+        input[type=range]::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:#e2b96f; border:2px solid #1a1a2e; cursor:pointer; }
       `}</style>
 
-      {/* NAV */}
+      {/* ── NAV ── */}
       <nav style={s.nav}>
         <div style={s.navBrand}>
-          <div ><Image src={logo} alt="Logo" width="50" height="50" /></div>
+          <Image src={logo} alt="Logo" width={44} height={44} style={{ borderRadius: 8 }} />
           <span style={s.navName}>صوتك</span>
           <span style={s.navDivider}>|</span>
           <span style={s.navSub}>Glove Studio</span>
         </div>
-
         <div style={s.navRight} ref={dropdownRef}>
           <button style={s.userPill} onClick={() => setDropdownOpen(o => !o)}>
             <div style={s.avatar}>{mockUser.initials}</div>
             <span style={s.userName}>{mockUser.name}</span>
             <span style={s.chevron}>{dropdownOpen ? '▲' : '▼'}</span>
           </button>
-
           {dropdownOpen && (
             <div style={s.dropdown}>
               <div style={s.ddHeader}>
                 <div style={{ ...s.avatar, width: 36, height: 36, fontSize: 13 }}>{mockUser.initials}</div>
                 <div>
                   <div style={s.ddName}>{mockUser.name}</div>
-                  <div style={s.ddEmail}>alex@example.com</div>
+                  <div style={s.ddEmail}>ahmed@example.com</div>
                 </div>
               </div>
               <div style={s.ddDivider} />
               <button onClick={() => router.push("/")} className="dd-item" style={s.ddItem}>Home</button>
-              <div style={s.ddDivider} />
               <button onClick={() => router.push("/models")} className="dd-item" style={s.ddItem}>Models</button>
               <div style={s.ddDivider} />
               <button onClick={() => router.push("/login")} className="logout-item" style={{ ...s.ddItem, color: '#ef4444' }}>Sign out →</button>
@@ -127,34 +330,22 @@ export default function GloveCapture() {
         </div>
       </nav>
 
-      {/* BODY */}
+      {/* ── BODY ── */}
       <div style={s.body}>
 
-        {/* Left: 3D canvas + controls */}
+        {/* ── LEFT COL ── */}
         <div style={s.leftCol}>
-
-          {/* Page title row */}
           <div style={s.titleRow}>
             <div>
               <h1 style={s.title}>Glove Data Studio</h1>
-              <p style={s.subtitle}>Capture and upload hand gesture sequences</p>
+              <p style={s.subtitle}>Capture hand gesture sequences for your submission</p>
             </div>
-            {isRecording && (
-              <div style={s.recBadge}>
-                <span className="rec-dot" style={s.recDot} />
-                REC · {frameCount} frames
-              </div>
-            )}
           </div>
 
-          {/* 3D Viewport */}
+          {/* Live 3-D preview */}
           <div style={s.viewport}>
-            <div style={s.viewportLabel}>3D Preview</div>
-            <Canvas camera={{ position: [0, 0, 5] }} style={{ width: '100%', height: '100%' }}>
-              <ambientLight intensity={0.5} />
-              <pointLight position={[10, 10, 10]} />
-              <HandModel sensorData={currentFrame} />
-            </Canvas>
+            <div style={s.viewportLabel}>LIVE PREVIEW</div>
+            <Scene sensorData={currentFrame} calibrate={calibrateRef} />
             {!currentFrame && (
               <div style={s.viewportOverlay}>
                 <div style={s.viewportIcon}>🧤</div>
@@ -163,118 +354,122 @@ export default function GloveCapture() {
             )}
           </div>
 
-          {/* Recording controls */}
+          {/* Calibrate button */}
           <div style={s.controlRow}>
             <button
-              className="start-btn"
-              style={{ ...s.btn, ...s.startBtn, ...(isRecording ? s.startBtnActive : {}) }}
-              onClick={() => { setRecordings([]); setIsRecording(true); }}
+              className="calib-btn"
+              style={s.calibBtn}
+              onClick={() => { calibrateRef.current = true; }}
             >
-              <span style={s.btnIcon}>●</span> Start Recording
+              ⟳ Calibrate
             </button>
-            <button
-              className="stop-btn"
-              style={{ ...s.btn, ...s.stopBtn }}
-              onClick={() => setIsRecording(false)}
-              disabled={!isRecording}
-            >
-              <span style={s.btnIcon}>■</span> Stop
-            </button>
+            {currentFrame && (
+              <div style={s.connectedBadge}>
+                <span style={s.connDot} /> Connected
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right: stats + trim + upload */}
+        {/* ── RIGHT COL ── */}
         <div style={s.rightCol}>
 
-          {/* Stats cards */}
-          <div style={s.statsGrid}>
-            {[
-              { label: 'Frames', value: frameCount },
-              { label: 'Duration', value: `${duration}s` },
-              { label: 'Trim Start', value: `${trimRange[0]}%` },
-              { label: 'Trim End', value: `${trimRange[1]}%` },
-            ].map(stat => (
-              <div key={stat.label} style={s.statCard}>
-                <div style={s.statValue}>{stat.value}</div>
-                <div style={s.statLabel}>{stat.label}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Trim panel */}
+          {/* Sign recorder panel */}
           <div style={s.panel}>
             <div style={s.panelHeader}>
-              <h3 style={s.panelTitle}>Trim Sequence</h3>
-              <p style={s.panelSub}>Adjust start and end percentage</p>
+              <h3 style={s.panelTitle}>Record a Sign</h3>
+              <p style={s.panelSub}>Type the label, then start recording</p>
             </div>
 
-            <div style={s.sliderGroup}>
-              <div style={s.sliderRow}>
-                <label style={s.sliderLabel}>Start</label>
-                <span style={s.sliderVal}>{trimRange[0]}%</span>
-              </div>
+            <div style={s.fieldGroup}>
+              <label style={s.label}>Sign label</label>
               <input
-                type="range" min="0" max="100"
-                value={trimRange[0]}
-                style={{ width: '100%' }}
-                onChange={(e) => setTrimRange([parseInt(e.target.value), trimRange[1]])}
+                type="text"
+                placeholder='e.g. "hello"'
+                value={signInput}
+                onChange={e => setSignInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleStartRecording()}
+                style={s.input}
+                onFocus={e => Object.assign(e.target.style, s.inputFocus)}
+                onBlur={e => Object.assign(e.target.style, { borderColor: 'rgba(255,255,255,0.10)', boxShadow: 'none' })}
               />
             </div>
 
-            <div style={s.sliderGroup}>
-              <div style={s.sliderRow}>
-                <label style={s.sliderLabel}>End</label>
-                <span style={s.sliderVal}>{trimRange[1]}%</span>
-              </div>
-              <input
-                type="range" min="0" max="100"
-                value={trimRange[1]}
-                style={{ width: '100%' }}
-                onChange={(e) => setTrimRange([trimRange[0], parseInt(e.target.value)])}
-              />
-            </div>
-
-            {/* Preview bar */}
-            <div style={s.trimBar}>
-              <div style={{
-                ...s.trimFill,
-                left: `${trimRange[0]}%`,
-                width: `${trimRange[1] - trimRange[0]}%`,
-              }} />
-            </div>
-            <p style={s.trimNote}>
-              {Math.max(0, Math.floor(((trimRange[1] - trimRange[0]) / 100) * frameCount))} frames selected
-            </p>
+            <button
+              className="start-btn"
+              style={{ ...s.startBtn, opacity: signInput.trim() ? 1 : 0.45 }}
+              onClick={handleStartRecording}
+              disabled={!signInput.trim()}
+            >
+              <span style={{ fontSize: 10 }}>●</span> Start Recording
+            </button>
           </div>
 
-          {/* Upload */}
+          {/* Signs collected */}
           <div style={s.panel}>
             <div style={s.panelHeader}>
-              <h3 style={s.panelTitle}>Upload to Database</h3>
-              <p style={s.panelSub}>Save the trimmed sequence</p>
+              <h3 style={s.panelTitle}>Recorded Signs</h3>
+              <p style={s.panelSub}>{signs.length} sign{signs.length !== 1 ? 's' : ''} in this submission</p>
+            </div>
+
+            {signs.length === 0 ? (
+              <div style={s.emptySignsBox}>
+                <span style={s.emptySignsIcon}>✋</span>
+                <p style={s.emptySignsText}>No signs yet — record your first one</p>
+              </div>
+            ) : (
+              <div style={s.signsList}>
+                {signs.map((sign, idx) => (
+                  <div key={idx} className="sign-tag" style={s.signTag}>
+                    <div style={s.signTagLeft}>
+                      <span style={s.signTagIndex}>{idx + 1}</span>
+                      <div>
+                        <div style={s.signTagLabel}>{sign.label}</div>
+                        <div style={s.signTagMeta}>
+                          {sign.frames.length} frames · {(sign.frames.length / 60).toFixed(1)}s
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      className="remove-sign"
+                      style={s.removeSign}
+                      onClick={() => handleRemoveSign(idx)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Upload submission */}
+          <div style={s.panel}>
+            <div style={s.panelHeader}>
+              <h3 style={s.panelTitle}>Upload Submission</h3>
+              <p style={s.panelSub}>Send all recorded signs to the database</p>
             </div>
 
             <button
               className="upload-btn"
-              style={s.uploadBtn}
-              onClick={handleSave}
-              disabled={frameCount === 0}
+              style={{ ...s.uploadBtn, opacity: signs.length > 0 ? 1 : 0.4 }}
+              onClick={handleUpload}
+              disabled={signs.length === 0}
             >
-              {uploadStatus === 'success' ? '✓ Uploaded!' : 'Upload to Database →'}
+              {uploadStatus === 'success' ? '✓ Uploaded!' : `Upload ${signs.length} Sign${signs.length !== 1 ? 's' : ''} →`}
             </button>
 
             {uploadStatus === 'success' && (
               <div style={s.successBanner}>
-                Sequence saved successfully to the database.
+                Submission saved successfully to the database.
               </div>
             )}
-
-            {frameCount === 0 && (
-              <p style={s.disabledNote}>Record a sequence first before uploading.</p>
+            {signs.length === 0 && (
+              <p style={s.disabledNote}>Add at least one sign before uploading.</p>
             )}
           </div>
 
-          {/* Sensor live readout */}
+          {/* Live sensor readout */}
           {currentFrame && (
             <div style={s.panel}>
               <div style={s.panelHeader}>
@@ -282,19 +477,13 @@ export default function GloveCapture() {
               </div>
               <div style={s.sensorGrid}>
                 {Object.entries(currentFrame).map(([key, fingerObj]) => (
-                  <div key={key} style={{...s.sensorRow, flexDirection: 'column', alignItems: 'flex-start', gap: '2px', marginBottom: '8px'}}>
-                    <span style={{...s.sensorKey, fontWeight: 'bold', color: '#fff'}}>{key}</span>
-                    
-                    {/* Show Pitch or W-Quaternion as a representative number for the bar */}
+                  <div key={key} style={{ ...s.sensorRow, flexDirection: 'column', alignItems: 'flex-start', gap: 2, marginBottom: 8 }}>
+                    <span style={{ ...s.sensorKey, fontWeight: 600, color: '#e2b96f', textTransform: 'capitalize' }}>{key}</span>
                     <div style={s.sensorRow}>
                       <div style={s.sensorBarBg}>
-                        <div style={{ 
-                          ...s.sensorBarFill, 
-                          width: `${Math.abs(fingerObj.pitch || fingerObj.qw || 0)}%` 
-                        }} />
+                        <div style={{ ...s.sensorBarFill, width: `${Math.min(100, Math.abs(fingerObj.pitch || fingerObj.qw || 0))}%` }} />
                       </div>
                       <span style={s.sensorVal}>
-                        {/* Displaying just the pitch or first quaternion value so it doesn't crash */}
                         {fingerObj.pitch !== undefined ? fingerObj.pitch.toFixed(1) : fingerObj.qw?.toFixed(2)}
                       </span>
                     </div>
@@ -305,216 +494,138 @@ export default function GloveCapture() {
           )}
         </div>
       </div>
+
+      {/* ── RECORDING MODAL ── */}
+      {modalOpen && (
+        <RecordingModal
+          signLabel={signLabel}
+          isRecording={isRecording}
+          frames={recordedFrames}
+          trimRange={trimRange}
+          setTrimRange={setTrimRange}
+          onStop={handleStopRecording}
+          onDiscard={handleDiscardSign}
+          onSave={handleSaveSign}
+          currentFrame={currentFrame}
+          calibrate={calibrateRef}
+        />
+      )}
     </div>
   );
 }
 
-/* ── Styles ── */
+// ─── Page styles ─────────────────────────────────────────────────────────────
 const s = {
-  page: {
-    minHeight: '100vh',
-    background: '#0d0f1a',
-    fontFamily: "'DM Sans', sans-serif",
-    color: '#e2e8f0',
-    display: 'flex',
-    flexDirection: 'column',
-  },
+  page: { minHeight: '100vh', background: '#0d0f1a', fontFamily: "'DM Sans', sans-serif", color: '#e2e8f0', display: 'flex', flexDirection: 'column' },
 
-  /* NAV */
-  nav: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '0 28px',
-    height: '60px',
-    background: 'rgba(255,255,255,0.03)',
-    borderBottom: '1px solid rgba(255,255,255,0.07)',
-    backdropFilter: 'blur(12px)',
-    position: 'sticky',
-    top: 0,
-    zIndex: 10,
-  },
-  navBrand: { display: 'flex', alignItems: 'center', gap: '10px' },
-  navLogo: { color: '#e2b96f', fontSize: '18px' },
-  navName: {
-    fontFamily: "'Playfair Display', serif",
-    fontSize: '18px',
-    fontWeight: 600,
-    color: '#ffffff',
-    letterSpacing: '0.5px',
-  },
-  navDivider: { color: 'rgba(255,255,255,0.15)', fontSize: '16px' },
-  navSub: { fontSize: '13px', color: '#a0aec0', fontWeight: 300 },
-  navRight: { position: 'relative' },
+  nav: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 28px', height:60, background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', position:'sticky', top:0, zIndex:20 },
+  navBrand: { display:'flex', alignItems:'center', gap:10 },
+  navName: { fontFamily:"'Playfair Display', serif", fontSize:18, fontWeight:600, color:'#ffffff', letterSpacing:'0.5px' },
+  navDivider: { color:'rgba(255,255,255,0.15)', fontSize:16 },
+  navSub: { fontSize:13, color:'#a0aec0', fontWeight:300 },
+  navRight: { position:'relative' },
+  userPill: { display:'flex', alignItems:'center', gap:9, padding:'5px 12px 5px 5px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:100, cursor:'pointer' },
+  avatar: { width:30, height:30, borderRadius:'50%', background:'linear-gradient(135deg, #0f3460, #e2b96f)', color:'#1a1a2e', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, letterSpacing:'0.5px', flexShrink:0 },
+  userName: { fontSize:13, fontWeight:500, color:'#e2e8f0' },
+  chevron: { fontSize:10, color:'#a0aec0' },
+  dropdown: { position:'absolute', top:'calc(100% + 8px)', right:0, background:'#1a1f35', borderRadius:16, boxShadow:'0 16px 48px rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.08)', minWidth:200, overflow:'hidden', animation:'slideDown 0.15s ease', zIndex:100 },
+  ddHeader: { display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background:'rgba(255,255,255,0.03)' },
+  ddName: { fontSize:13, fontWeight:500, color:'#e2e8f0' },
+  ddEmail: { fontSize:11, color:'#718096' },
+  ddDivider: { height:1, background:'rgba(255,255,255,0.06)' },
+  ddItem: { display:'block', width:'100%', padding:'10px 16px', background:'transparent', border:'none', textAlign:'left', fontSize:13, color:'#a0aec0', cursor:'pointer', transition:'background 0.15s', fontFamily:"'DM Sans', sans-serif" },
 
-  userPill: {
-    display: 'flex', alignItems: 'center', gap: '9px',
-    padding: '5px 12px 5px 5px',
-    background: 'rgba(255,255,255,0.06)',
-    border: '1px solid rgba(255,255,255,0.10)',
-    borderRadius: '100px', cursor: 'pointer', transition: 'border-color 0.2s',
-  },
-  avatar: {
-    width: 30, height: 30, borderRadius: '50%',
-    background: 'linear-gradient(135deg, #0f3460, #e2b96f)',
-    color: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px', flexShrink: 0,
-  },
-  userName: { fontSize: '13px', fontWeight: 500, color: '#e2e8f0' },
-  chevron: { fontSize: '10px', color: '#a0aec0' },
+  body: { flex:1, display:'flex', gap:24, padding:28, maxWidth:1400, margin:'0 auto', width:'100%' },
+  leftCol: { flex:1, display:'flex', flexDirection:'column', gap:20, minWidth:0 },
+  rightCol: { width:340, flexShrink:0, display:'flex', flexDirection:'column', gap:16 },
 
-  dropdown: {
-    position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-    background: '#1a1f35', borderRadius: '16px',
-    boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    minWidth: '200px', overflow: 'hidden',
-    animation: 'slideDown 0.15s ease', zIndex: 100,
-  },
-  ddHeader: {
-    display: 'flex', alignItems: 'center', gap: '12px',
-    padding: '14px 16px', background: 'rgba(255,255,255,0.03)',
-  },
-  ddName: { fontSize: '13px', fontWeight: 500, color: '#e2e8f0' },
-  ddEmail: { fontSize: '11px', color: '#718096' },
-  ddDivider: { height: '1px', background: 'rgba(255,255,255,0.06)' },
-  ddItem: {
-    display: 'block', width: '100%', padding: '10px 16px',
-    background: 'transparent', border: 'none', textAlign: 'left',
-    fontSize: '13px', color: '#a0aec0', cursor: 'pointer',
-    transition: 'background 0.15s, color 0.15s',
-    fontFamily: "'DM Sans', sans-serif",
-  },
+  titleRow: { display:'flex', justifyContent:'space-between', alignItems:'flex-start' },
+  title: { fontFamily:"'Playfair Display', serif", fontSize:26, fontWeight:600, color:'#ffffff', marginBottom:4 },
+  subtitle: { fontSize:13, color:'#718096', fontWeight:300 },
 
-  /* BODY */
-  body: {
-    flex: 1, display: 'flex', gap: '24px',
-    padding: '28px', maxWidth: '1400px', margin: '0 auto', width: '100%',
-  },
+  viewport: { flex:1, minHeight:400, background:'linear-gradient(145deg, #0a0c18, #111827)', borderRadius:20, border:'1px solid rgba(255,255,255,0.06)', position:'relative', overflow:'hidden', boxShadow:'inset 0 0 60px rgba(0,0,0,0.4)' },
+  viewportLabel: { position:'absolute', top:14, left:18, zIndex:2, fontSize:11, fontWeight:500, color:'#4a5568', letterSpacing:'1px', textTransform:'uppercase' },
+  viewportOverlay: { position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', pointerEvents:'none' },
+  viewportIcon: { fontSize:40, marginBottom:12, opacity:0.3 },
+  viewportHint: { fontSize:13, color:'#4a5568' },
 
-  leftCol: { flex: 1, display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 },
-  rightCol: { width: '340px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px' },
+  controlRow: { display:'flex', gap:12, alignItems:'center' },
+  calibBtn: { display:'flex', alignItems:'center', gap:8, padding:'11px 20px', background:'rgba(226,185,111,0.08)', color:'#e2b96f', border:'1px solid rgba(226,185,111,0.25)', borderRadius:12, fontSize:14, fontWeight:500, cursor:'pointer', transition:'background 0.2s, transform 0.15s', fontFamily:"'DM Sans', sans-serif" },
+  connectedBadge: { display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#34d399' },
+  connDot: { width:8, height:8, borderRadius:'50%', background:'#34d399', display:'inline-block' },
 
-  titleRow: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-  },
-  title: {
-    fontFamily: "'Playfair Display', serif",
-    fontSize: '26px', fontWeight: 600, color: '#ffffff', marginBottom: '4px',
-  },
-  subtitle: { fontSize: '13px', color: '#718096', fontWeight: 300 },
+  panel: { background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:18, padding:20 },
+  panelHeader: { marginBottom:16 },
+  panelTitle: { fontSize:14, fontWeight:500, color:'#e2e8f0', marginBottom:3 },
+  panelSub: { fontSize:12, color:'#718096', fontWeight:300 },
 
-  recBadge: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '8px 14px', borderRadius: '100px',
-    background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)',
-    color: '#ef4444', fontSize: '12.5px', fontWeight: 500, letterSpacing: '0.5px',
-  },
-  recDot: { width: 8, height: 8, borderRadius: '50%', background: '#ef4444', display: 'inline-block' },
+  fieldGroup: { display:'flex', flexDirection:'column', gap:8, marginBottom:14 },
+  label: { fontSize:12, color:'#a0aec0', fontWeight:500 },
+  input: { padding:'11px 14px', borderRadius:10, border:'1px solid rgba(255,255,255,0.10)', background:'rgba(255,255,255,0.04)', color:'#e2e8f0', fontSize:14, fontFamily:"'DM Sans', sans-serif", transition:'border-color 0.2s, box-shadow 0.2s' },
+  inputFocus: { borderColor:'rgba(226,185,111,0.5)', boxShadow:'0 0 0 3px rgba(226,185,111,0.08)' },
+  startBtn: { width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'12px', background:'#dc2626', color:'#fff', border:'none', borderRadius:12, fontSize:14, fontWeight:500, cursor:'pointer', transition:'background 0.2s, transform 0.15s', fontFamily:"'DM Sans', sans-serif" },
 
-  /* VIEWPORT */
-  viewport: {
-    flex: 1, minHeight: '380px',
-    background: 'linear-gradient(145deg, #0a0c18, #111827)',
-    borderRadius: '20px',
-    border: '1px solid rgba(255,255,255,0.06)',
-    position: 'relative', overflow: 'hidden',
-    boxShadow: 'inset 0 0 60px rgba(0,0,0,0.4)',
-  },
-  viewportLabel: {
-    position: 'absolute', top: 14, left: 18, zIndex: 2,
-    fontSize: '11px', fontWeight: 500, color: '#4a5568',
-    letterSpacing: '1px', textTransform: 'uppercase',
-  },
-  viewportOverlay: {
-    position: 'absolute', inset: 0, display: 'flex',
-    flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    pointerEvents: 'none',
-  },
-  viewportIcon: { fontSize: '40px', marginBottom: '12px', opacity: 0.3 },
-  viewportHint: { fontSize: '13px', color: '#4a5568' },
+  emptySignsBox: { display:'flex', flexDirection:'column', alignItems:'center', padding:'24px 12px', background:'rgba(255,255,255,0.02)', borderRadius:12, border:'1px dashed rgba(255,255,255,0.08)' },
+  emptySignsIcon: { fontSize:28, opacity:0.3, marginBottom:8 },
+  emptySignsText: { fontSize:12, color:'#4a5568', textAlign:'center' },
 
-  /* CONTROLS */
-  controlRow: { display: 'flex', gap: '12px' },
-  btn: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '12px 22px', borderRadius: '12px',
-    border: 'none', fontSize: '14px', fontWeight: 500,
-    cursor: 'pointer', transition: 'background 0.2s, transform 0.15s',
-    fontFamily: "'DM Sans', sans-serif",
-  },
-  btnIcon: { fontSize: '10px' },
-  startBtn: { background: '#dc2626', color: '#fff' },
-  startBtnActive: { background: '#b91c1c' },
-  stopBtn: { background: '#1f2937', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.08)' },
+  signsList: { display:'flex', flexDirection:'column', gap:8 },
+  signTag: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 14px', background:'rgba(255,255,255,0.04)', borderRadius:10, border:'1px solid rgba(255,255,255,0.07)', transition:'border-color 0.2s' },
+  signTagLeft: { display:'flex', alignItems:'center', gap:10 },
+  signTagIndex: { width:22, height:22, borderRadius:'50%', background:'rgba(226,185,111,0.15)', color:'#e2b96f', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700 },
+  signTagLabel: { fontSize:13.5, fontWeight:500, color:'#e2e8f0' },
+  signTagMeta: { fontSize:11, color:'#718096', marginTop:1 },
+  removeSign: { padding:'4px 8px', background:'transparent', border:'none', color:'#ef4444', cursor:'pointer', fontSize:12, opacity:0, transition:'opacity 0.2s', borderRadius:6 },
 
-  /* STATS */
-  statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
-  statCard: {
-    background: 'rgba(255,255,255,0.03)',
-    border: '1px solid rgba(255,255,255,0.07)',
-    borderRadius: '14px', padding: '14px 16px',
-  },
-  statValue: {
-    fontFamily: "'Playfair Display', serif",
-    fontSize: '22px', fontWeight: 600, color: '#e2b96f', marginBottom: '2px',
-  },
-  statLabel: { fontSize: '11px', color: '#718096', textTransform: 'uppercase', letterSpacing: '0.8px' },
+  uploadBtn: { width:'100%', padding:13, background:'#1a1a2e', color:'#e2b96f', border:'1px solid rgba(226,185,111,0.25)', borderRadius:12, fontSize:14, fontWeight:500, cursor:'pointer', transition:'background 0.2s, transform 0.15s', fontFamily:"'DM Sans', sans-serif", letterSpacing:'0.3px' },
+  successBanner: { marginTop:12, padding:'10px 14px', background:'rgba(5,150,105,0.12)', border:'1px solid rgba(5,150,105,0.25)', borderRadius:10, fontSize:12.5, color:'#34d399' },
+  disabledNote: { marginTop:10, fontSize:11.5, color:'#4a5568' },
 
-  /* PANEL */
-  panel: {
-    background: 'rgba(255,255,255,0.03)',
-    border: '1px solid rgba(255,255,255,0.07)',
-    borderRadius: '18px', padding: '20px',
-  },
-  panelHeader: { marginBottom: '18px' },
-  panelTitle: { fontSize: '14px', fontWeight: 500, color: '#e2e8f0', marginBottom: '3px' },
-  panelSub: { fontSize: '12px', color: '#718096', fontWeight: 300 },
+  sensorGrid: { display:'flex', flexDirection:'column', gap:6 },
+  sensorRow: { display:'flex', alignItems:'center', gap:10 },
+  sensorKey: { fontSize:11.5, color:'#718096', width:50 },
+  sensorBarBg: { flex:1, height:4, background:'#1a1f35', borderRadius:4, overflow:'hidden' },
+  sensorBarFill: { height:'100%', background:'linear-gradient(90deg, #0f3460, #e2b96f)', borderRadius:4, transition:'width 0.2s' },
+  sensorVal: { fontSize:11, color:'#e2b96f', width:34, textAlign:'right' },
+};
 
-  /* SLIDERS */
-  sliderGroup: { marginBottom: '18px' },
-  sliderRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '8px' },
-  sliderLabel: { fontSize: '12px', color: '#a0aec0' },
-  sliderVal: { fontSize: '12px', color: '#e2b96f', fontWeight: 500 },
+// ─── Modal styles ─────────────────────────────────────────────────────────────
+const rm = {
+  overlay: { position:'fixed', inset:0, background:'rgba(5,7,18,0.85)', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50, animation:'fadeIn 0.2s ease', padding:24 },
+  modal: { background:'#0d1020', border:'1px solid rgba(255,255,255,0.08)', borderRadius:24, width:'100%', maxWidth:900, maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 32px 80px rgba(0,0,0,0.7)', animation:'slideUp 0.3s ease' },
 
-  /* TRIM BAR */
-  trimBar: {
-    height: '6px', background: '#1a1f35',
-    borderRadius: '6px', position: 'relative', overflow: 'hidden',
-    marginTop: '4px',
-  },
-  trimFill: {
-    position: 'absolute', height: '100%',
-    background: 'linear-gradient(90deg, #0f3460, #e2b96f)',
-    borderRadius: '6px',
-  },
-  trimNote: { fontSize: '11px', color: '#4a5568', marginTop: '8px' },
+  header: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'18px 24px', background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.06)', flexShrink:0 },
+  headerLeft: { display:'flex', alignItems:'center', gap:14 },
+  headerRight: {},
+  signChip: { display:'flex', alignItems:'center', gap:8, padding:'6px 14px', background:'rgba(226,185,111,0.10)', border:'1px solid rgba(226,185,111,0.25)', borderRadius:100 },
+  signChipIcon: { fontSize:16 },
+  signChipText: { fontSize:14, fontWeight:600, color:'#e2b96f' },
+  recBadge: { display:'flex', alignItems:'center', gap:8, padding:'5px 12px', borderRadius:100, background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.25)', color:'#ef4444', fontSize:12, fontWeight:500 },
+  recDot: { width:8, height:8, borderRadius:'50%', background:'#ef4444', display:'inline-block' },
+  playBadge: { fontSize:12, color:'#34d399', padding:'5px 12px', background:'rgba(52,211,153,0.08)', border:'1px solid rgba(52,211,153,0.20)', borderRadius:100 },
+  durationLabel: { fontSize:13, color:'#718096' },
 
-  /* UPLOAD */
-  uploadBtn: {
-    width: '100%', padding: '13px',
-    background: '#1a1a2e',
-    color: '#e2b96f',
-    border: '1px solid rgba(226,185,111,0.25)',
-    borderRadius: '12px',
-    fontSize: '14px', fontWeight: 500,
-    cursor: 'pointer', transition: 'background 0.2s, transform 0.15s',
-    fontFamily: "'DM Sans', sans-serif",
-    letterSpacing: '0.3px',
-  },
-  successBanner: {
-    marginTop: '12px', padding: '10px 14px',
-    background: 'rgba(5,150,105,0.12)',
-    border: '1px solid rgba(5,150,105,0.25)',
-    borderRadius: '10px', fontSize: '12.5px', color: '#34d399',
-  },
-  disabledNote: { marginTop: '10px', fontSize: '11.5px', color: '#4a5568' },
+  viewport: { flex:1, minHeight:380, position:'relative', background:'linear-gradient(145deg, #080a14, #0f1420)', overflow:'hidden' },
+  vpLabel: { position:'absolute', top:12, left:16, zIndex:2, fontSize:10, color:'#4a5568', letterSpacing:'1.5px', textTransform:'uppercase' },
+  vpOverlay: { position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', pointerEvents:'none' },
 
-  /* SENSOR */
-  sensorGrid: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  sensorRow: { display: 'flex', alignItems: 'center', gap: '10px' },
-  sensorKey: { fontSize: '11.5px', color: '#718096', width: '50px', textTransform: 'capitalize' },
-  sensorBarBg: { flex: 1, height: '4px', background: '#1a1f35', borderRadius: '4px', overflow: 'hidden' },
-  sensorBarFill: { height: '100%', background: 'linear-gradient(90deg, #0f3460, #e2b96f)', borderRadius: '4px', transition: 'width 0.2s' },
-  sensorVal: { fontSize: '11px', color: '#e2b96f', width: '34px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
+  controls: { padding:'18px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(255,255,255,0.02)', borderTop:'1px solid rgba(255,255,255,0.06)', flexShrink:0 },
+  controlHint: { fontSize:13, color:'#4a5568' },
+  stopBtn: { display:'flex', alignItems:'center', gap:8, padding:'12px 28px', background:'#dc2626', color:'#fff', border:'none', borderRadius:12, fontSize:14, fontWeight:500, cursor:'pointer', transition:'background 0.2s, transform 0.15s', fontFamily:"'DM Sans', sans-serif" },
+
+  trimSection: { padding:'18px 24px', background:'rgba(255,255,255,0.02)', borderTop:'1px solid rgba(255,255,255,0.06)', flexShrink:0 },
+  trimHeader: { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 },
+  trimTitle: { fontSize:14, fontWeight:500, color:'#e2e8f0' },
+  trimMeta: { fontSize:12, color:'#718096' },
+  sliders: { marginBottom:16 },
+  sliderGroup: { marginBottom:12 },
+  sliderRow: { display:'flex', justifyContent:'space-between', marginBottom:6 },
+  sliderLabel: { fontSize:12, color:'#a0aec0' },
+  sliderVal: { fontSize:12, color:'#e2b96f', fontWeight:500 },
+  trimBar: { height:6, background:'#1a1f35', borderRadius:6, position:'relative', overflow:'hidden', marginTop:4 },
+  trimFill: { position:'absolute', height:'100%', background:'linear-gradient(90deg, #0f3460, #e2b96f)', borderRadius:6 },
+
+  actionRow: { display:'flex', gap:12, justifyContent:'flex-end' },
+  discardBtn: { padding:'11px 22px', background:'rgba(239,68,68,0.06)', color:'#ef4444', border:'1px solid rgba(239,68,68,0.20)', borderRadius:12, fontSize:14, fontWeight:500, cursor:'pointer', transition:'background 0.15s, color 0.15s', fontFamily:"'DM Sans', sans-serif" },
+  saveSignBtn: { padding:'11px 28px', background:'#059669', color:'#fff', border:'none', borderRadius:12, fontSize:14, fontWeight:500, cursor:'pointer', transition:'background 0.2s, transform 0.15s', fontFamily:"'DM Sans', sans-serif" },
 };
