@@ -7,10 +7,10 @@ import logo from "../../assets/logo.png";
 
 
 const mockSubmissions = [
-  { id: "1", name: "Session 1", language: "Arabic", owner: "me" },
-  { id: "2", name: "Session 2", language: "Arabic", owner: "me" },
-  { id: "3", name: "Session 3", language: "Arabic", owner: "other" },
-  { id: "4", name: "English Session 1", language: "English", owner: "me" },
+  { id: "1", name: "Session 1", language: "Arabic", owner: "me", signs: ["I", "Thank you", "Hello", "Bread", "Water", "Family"] },
+  { id: "2", name: "Session 2", language: "Arabic", owner: "me", signs: ["School", "Work", "Friend", "Happy"] },
+  { id: "3", name: "Session 3", language: "Arabic", owner: "other", signs: ["I", "Hello", "How are you?"] },
+  { id: "4", name: "English Session 1", language: "English", owner: "me", signs: ["Yes", "No", "Please"] },
 ];
 
 const mockUser = { name: "Ahmed Ashry", initials: "AA" };
@@ -23,6 +23,8 @@ export default function SubmissionsPage() {
   const [selected, setSelected] = useState([]);
   const [showError, setShowError] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [activeSubmission, setActiveSubmission] = useState(null);
   const [submissionName, setSubmissionName] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -41,10 +43,16 @@ export default function SubmissionsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const toggleSelection = (id) => {
+  const toggleSelection = (e, id) => {
+    e.stopPropagation(); // Prevents the modal from opening when clicking the checkbox
     setSelected((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
+  };
+
+  const handleOpenView = (submission) => {
+    setActiveSubmission(submission);
+    setShowViewModal(true);
   };
 
   const handleMerge = () => {
@@ -96,6 +104,7 @@ export default function SubmissionsPage() {
         .close-btn:hover { background: #f0f0f0 !important; }
         .save-btn:hover { background: #0f3460 !important; }
         .cancel-btn:hover { background: #e2e8f0 !important; }
+        .info-clickable-area:hover { background-color: rgba(0, 123, 255, 0.1); max-width: 120px; text-decoration: none;}
         .logout-item:hover { background: #fff5f5 !important; color: #c0392b !important; }
         .dd-item:hover { background: #f7f8fc !important; }
         .dropdown-item:hover { background: #f7f8fc !important; }
@@ -208,57 +217,79 @@ export default function SubmissionsPage() {
           </div>
         ) : (
           <div style={s.list}>
-            {submissions.map((submission) => {
-              const isSelected = selected.includes(submission.id);
-              const isHovered = hoveredId === submission.id;
-              const isOwned = submission.owner === "me";
-              return (
-                <div
-                  key={submission.id}
-                  className="sub-item"
-                  style={{
-                    ...s.item,
-                    ...(isSelected ? s.itemSelected : {}),
-                    ...(isHovered && !isSelected ? s.itemHover : {}),
-                  }}
-                  onClick={() => toggleSelection(submission.id)}
-                  onMouseEnter={() => setHoveredId(submission.id)}
-                  onMouseLeave={() => setHoveredId(null)}
-                >
-                  {/* Left accent */}
-                  {isSelected && <div style={s.itemAccent} />}
-
-                  {/* Checkbox */}
-                  <div style={{ ...s.checkbox, ...(isSelected ? s.checkboxChecked : {}) }}>
-                    {isSelected && <span style={s.checkMark}>✓</span>}
-                  </div>
-
-                  {/* Icon */}
-                  <div style={s.fileIcon}>📄</div>
-
-                  {/* Info */}
-                  <div style={s.itemInfo}>
-                    <span style={s.itemName}>{submission.name}</span>
-                    <span style={s.itemMeta}>{submission.language}</span>
-                  </div>
-
-                  {/* Owner badge */}
-                  <div style={{ ...s.ownerBadge, ...(isOwned ? s.ownerBadgeMe : s.ownerBadgeOther) }}>
-                    {isOwned ? 'Owned by me' : 'Shared'}
-                  </div>
-
-                  {/* Delete */}
-                  <button
-                    className="delete-btn"
-                    style={s.deleteBtn}
-                    onClick={(e) => { e.stopPropagation(); handleDelete(submission.id); }}
-                  >
-                    Delete
-                  </button>
+          {submissions.map((submission) => {
+            const isSelected = selected.includes(submission.id);
+            return (
+              <div
+                key={submission.id}
+                className="sub-item"
+                style={{ 
+                  ...s.item, 
+                  ...(isSelected ? s.itemSelected : {}), 
+                  ...(hoveredId === submission.id && !isSelected ? s.itemHover : {}),
+                  cursor: 'pointer' // Shows the whole box is interactive
+                }}
+                // 1. Clicking the box now toggles selection
+                onClick={(e) => toggleSelection(e, submission.id)} 
+                onMouseEnter={() => setHoveredId(submission.id)}
+                onMouseLeave={() => setHoveredId(null)}
+              >
+                {isSelected && <div style={s.itemAccent} />}
+                
+                {/* Checkbox reflects state */}
+                <div style={{ ...s.checkbox, ...(isSelected ? s.checkboxChecked : {}) }}>
+                  {isSelected && <span style={s.checkMark}>✓</span>}
                 </div>
-              );
-            })}
-          </div>
+
+                <div style={s.fileIcon}>📄</div>
+                <div 
+                  style={{ 
+                    ...s.itemInfo, 
+                    padding: '4px 8px', 
+                    borderRadius: '4px',
+                    transition: 'background 0.2s'
+                  }}
+                >
+                  <span style={s.itemName}>{submission.name}</span>
+                  {/* 3. Visual cue for the signs part */}
+                  <span style={{ 
+                    ...s.itemMeta, 
+                    color: '#007bff', 
+                    textDecoration: 'underline',
+                    fontWeight: '500', 
+                    padding: '2px 10px',
+                    borderRadius: '20px',
+                    border: 'none',
+                    width: 'fit-content',
+                  }}
+                  className="info-clickable-area"
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevents the box-level toggleSelection from firing
+                    handleOpenView(submission);
+                  }}
+                  >
+                    {submission.language} • {submission.signs.length} signs
+                  </span>
+                </div>
+
+                <div style={{ ...s.ownerBadge, ...(submission.owner === "me" ? s.ownerBadgeMe : s.ownerBadgeOther) }}>
+                  {submission.owner === "me" ? 'Owned' : 'Shared'}
+                </div>
+
+                <button 
+                  className="delete-btn" 
+                  style={s.deleteBtn} 
+                  onClick={(e) => { 
+                    e.stopPropagation(); // Prevents toggleSelection
+                    handleDelete(submission.id); 
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            );
+          })}
+        </div>
         )}
       </main>
 
@@ -282,6 +313,28 @@ export default function SubmissionsPage() {
             >
               Understood
             </button>
+          </div>
+        </div>
+      )}
+      {/* Submission MODAL */}
+      {showViewModal && activeSubmission && (
+        <div className="modal-overlay" style={s.overlay} onClick={() => setShowViewModal(false)}>
+          <div className="modal-box" style={{ ...s.modal, maxWidth: '500px' }} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div>
+                <h2 style={s.modalTitle}>{activeSubmission.name}</h2>
+                <p style={s.modalSub}>Signs included in this session</p>
+              </div>
+              <button className="close-btn" style={s.closeBtn} onClick={() => setShowViewModal(false)}>✕</button>
+            </div>
+
+            <div style={s.signsContainer}>
+              {activeSubmission.signs.map((sign, idx) => (
+                <div key={idx} style={s.signTag}>
+                  {sign}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -503,7 +556,9 @@ const s = {
     display: 'flex', alignItems: 'center', gap: '14px',
     padding: '18px 20px',
     background: '#ffffff', borderRadius: '16px',
-    border: '1.5px solid #edf0f7',
+    borderColor: '#edf0f7',
+    borderWidth: '1.5px',
+    borderStyle: 'solid',
     boxShadow: '0 1px 8px rgba(0,0,0,0.04)',
     cursor: 'pointer',
     transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
@@ -527,7 +582,10 @@ const s = {
 
   checkbox: {
     width: 20, height: 20, borderRadius: '6px',
-    border: '2px solid #cbd5e0', background: '#f7f8fc',
+    borderStyle: 'solid',
+    borderWidth: '2px',
+    borderColor: '#cbd5e0',
+    background: '#f7f8fc',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     flexShrink: 0, transition: 'all 0.15s',
   },
@@ -633,4 +691,13 @@ const s = {
     transition: 'background 0.2s',
     fontFamily: "'DM Sans', sans-serif",
   },
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(10,15,30,0.45)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 },
+  modal: { background: '#ffffff', borderRadius: '24px', width: '90%', padding: '32px', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' },
+  modalTitle: { fontFamily: "'Playfair Display', serif", fontSize: '22px', color: '#1a1a2e' },
+  modalSub: { fontSize: '13px', color: '#a0aec0' },
+  closeBtn: { width: 34, height: 34, borderRadius: '50%', border: 'none', background: '#f7f8fc', cursor: 'pointer' },
+  saveBtn: { padding: '13px', background: '#1a1a2e', color: '#ffffff', border: 'none', borderRadius: '12px', cursor: 'pointer' },
+  signsContainer: { display: 'flex', flexWrap: 'wrap', gap: '8px', maxHeight: '300px', overflowY: 'auto', padding: '4px' },
+  signTag: { padding: '8px 16px', background: '#f0f4ff', border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: '13.5px', color: '#0f3460', fontWeight: 500 },
 };
