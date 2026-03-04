@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "user_initials": "AA",
+    "timestamp": "2026-03-01T14:00:00Z",
+    "total_signs": 3
+  },
+  "readings": {
+    "Hello": [
+      {"thumb": 45, "index": 10, "middle": 5, "ring": 5, "pinky": 5, "acc_x": 0.1, "acc_y": 9.8},
+      {"thumb": 46, "index": 12, "middle": 6, "ring": 5, "pinky": 5, "acc_x": 0.2, "acc_y": 9.7}
+    ],
+    "Thank You": [
+      {"thumb": 10, "index": 90, "middle": 90, "ring": 90, "pinky": 90, "acc_x": -1.5, "acc_y": 4.2}
+    ],
+    "Help": [
+      {"thumb": 80, "index": 80, "middle": 80, "ring": 80, "pinky": 80, "acc_x": 0.0, "acc_y": 0.0}
+    ]
+  }
+}

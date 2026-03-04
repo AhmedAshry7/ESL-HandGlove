@@ -2,21 +2,48 @@
 import Image from "next/image";
 import logo from "../assets/logo.png";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import hide from "../assets/hide.png";
 import show from "../assets/show.png";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
-
-    const handleLogin = async (e) => {
+  const [isLoading , setIsLoading]=useState(false);
+  const handleLogin = async (e) => {
       e.preventDefault();
       console.log("Login attempted with:", { email, password });
-/*    e.preventDefault();
       setError("");
       setIsLoading(true);
+      try {      
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) {
+          console.log(error)
+          setError(error.message);
+          setPassword("");
+          setEmail("");
+          setIsLoading(false);
+        } else{
+          router.push("/");
+        }
+      } catch (err) {
+        setError("Connection error. Please try again.");
+        setIsLoading(false);
+      }
+
+    };
+
+    /*     const handleLogin = async (e) => {
+
+   e.preventDefault();
+
 
       try {
         const res = await fetch("http://localhost:5000/auth/login", {
@@ -43,8 +70,8 @@ export default function LoginPage() {
       } catch (err) {
         setError("Connection error. Please try again.");
         setIsLoading(false);
-      } */
-    };
+      } 
+    };*/
 
   return (
     <div style={styles.page}>
@@ -60,7 +87,7 @@ export default function LoginPage() {
         <div style={styles.formCard}>
           <div style={styles.formTop}>
             <h1 style={styles.heading}>Welcome back</h1>
-             <p style={styles.subtitle}>Slogan</p>
+             <p style={styles.subtitle}>Help us empower them</p>
           </div>
 
           <form style={styles.form} onSubmit={handleLogin} >
@@ -121,12 +148,13 @@ export default function LoginPage() {
               )}
             <button
               type="submit"
-              style={styles.btn}
-              onMouseEnter={e => Object.assign(e.target.style, styles.btnHover)}
-              onMouseLeave={e => Object.assign(e.target.style, { background: '#1a1a2e', transform: 'translateY(0)' })}
+              style={{ ...styles.btn, opacity: isLoading ? 0.7 : 1, cursor: isLoading ? 'not-allowed' : 'pointer' }}
+              disabled={isLoading}
+              onMouseEnter={e => !isLoading && Object.assign(e.target.style, styles.btnHover)}
+              onMouseLeave={e => !isLoading && Object.assign(e.target.style, { background: '#1a1a2e', transform: 'translateY(0)' })}
             >
-              Sign In →
-            </button>
+              {isLoading ? <div className="spinner" /> : "Sign In →"}
+          </button>
           </form>
 
           <p style={styles.switchText}>
@@ -142,6 +170,21 @@ export default function LoginPage() {
         body { font-family: 'DM Sans', sans-serif; }
         input::placeholder { color: #a0aec0; }
         input:focus { outline: none; }
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .spinner {
+          width: 20px;
+          height: 20px;
+          border: 3px solid rgba(255,255,255,0.3);
+          border-radius: 50%;
+          border-top-color: #fff;
+          animation: spin 0.8s linear infinite;
+          margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
         @keyframes fadeUp {
           from { opacity: 0; transform: translateY(16px); }
           to { opacity: 1; transform: translateY(0); }
