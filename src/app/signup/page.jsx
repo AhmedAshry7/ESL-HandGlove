@@ -17,8 +17,10 @@ export default function SignupPage() {
   const [isLoading , setIsLoading]=useState(false);
   const handleSignup = async (e) => {
     e.preventDefault();
-    const initials = userName.split(" ").filter(Boolean).map(name => name[0]) .join("").toUpperCase();
-    setIsLoading(true);
+    const names = userName.trim().split(/\s+/);
+    const initials = names.length > 1 
+      ? (names[0][0] + names[names.length - 1][0]).toUpperCase()
+      : names[0][0].toUpperCase();setIsLoading(true);
     console.log("Signup attempted with:", { userName, email, password, initials });
     try{
       const { data, error } = await supabase.auth.signUp({
