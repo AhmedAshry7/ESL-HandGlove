@@ -2,82 +2,283 @@
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import logo from "../assets/logo.png";
+import trash from "../assets/trash.png";
 import {useRouter} from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+import toast from "react-hot-toast";
 
-
-const mockUser = { name: "Ahmed Ashry", initials: "AA" };
 
 export default function ModelsPage() {
   const router = useRouter();
+  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
+  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
+  const [userId, setUserId] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [showTrainModal, setShowTrainModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [modelDeleting, setModelDeleting] = useState(null);
+  const [languages, setLanguages] = useState([]);
   const [modelName, setModelName] = useState("");
-  const modelsTemp = [{id:1, name:"ESL.0",language:"Arabic"}, {id:2, name:"ESL.2.1",language:"English"}, {id:3, name:"ESL.3",language:"French"}];
-  const [models, setModels] = useState(modelsTemp);
+  const [models, setModels] = useState([]);
   const [selectedLang, setSelectedLang] = useState("");
   const [pickleFile, setPickleFile] = useState(null);
+  const [showError, setShowError] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [dropdown2Open, setDropdown2Open] = useState(false);
+  const [selectedLangName,setSelectedLangName]=useState(null);
   const dropdownRef = useRef(null);
-  const [trainFiles, setTrainFiles] = useState(null);
-  const [trainModelName, setTrainModelName] = useState(""); // Keeping for consistency/logic
+  const languageRef = useRef(null);
+  const [trainModelName, setTrainModelName] = useState("");
+  const [training, setTraining] = useState(false);
+  const [manualPath, setManualPath] = useState("");
 
-  const handleTrainSubmit = () => {
-    if (!trainModelName.trim() || !trainFiles || trainFiles.length === 0) {
-      alert("Please provide a model name and select a training data folder.");
-      return;
+
+  const handleTrainSubmit = async (e) => {
+      e.preventDefault();
+      setTraining(true);
+      if (!trainModelName.trim()) { toast.error("Model name required"); return; }
+      if (!manualPath) { toast.error("Please put a folder path"); return; }
+
+      const payload = {
+          modelName: trainModelName,
+          userId: userId,
+          absolutePath: manualPath
+      };
+
+      try {
+        const response = await fetch(`${backendUrl}/models/train`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (response.ok) {
+            toast.success(`Success! Model saved in ${manualPath}.`);
+            setShowTrainModal(false);
+        } else {
+            toast.error(result.error);
+        }
+        setTrainModelName("");
+        setManualPath("");
+    } catch (err) {
+        toast.error("Connection failed");
+    } finally {
+        setTraining(false);
     }
-
-    // In the future, this is where you'd send the files to your Python script
-    console.log(`Training "${trainModelName}" with ${trainFiles.length} files.`);
-    
-    const newModel = {
-      id: Date.now(),
-      name: trainModelName.trim(),
-      language: "Custom",
-      status: "Training...", // Useful to show a different state in the list
-      fileCount: trainFiles.length
-    };
-
-    setModels((prev) => [...prev, newModel]);
-    
-    // Cleanup
-    setTrainModelName("");
-    setTrainFiles(null);
-    setShowTrainModal(false);
   };
 
   useEffect(() => {
     function handleClickOutside(e) {
+      // Check User Dropdown
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setDropdownOpen(false);
+      }
+      // Check Language Dropdown
+      if (languageRef.current && !languageRef.current.contains(e.target)) {
+        setDropdown2Open(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleSave = () => {
-    // Validation: Ensure all fields are filled
-    if (!modelName.trim() || !selectedLang || !pickleFile) {
-      alert("Please provide a name, select a language, and upload a file.");
-      return;
+  useEffect(() => {
+    async function init() {
+      setLoading(true);
+
+      // 1. Get model brief first
+      const res = await fetch(`${backendUrl}/models/models`);
+      const data = await res.json();
+      console.log("models:", data);
+      setModels(data);
+
+      // 2. Get user
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserEmail(user.email);
+      setUserId(user.id);
+      console.log("Authenticated user:", user);
+      const userRes = await fetch(`${backendUrl}/profile/info?userId=${user.id}`);
+      const userData = await userRes.json();
+      setUser(userData[0]);
+      console.log("Profile info:", userData);
+
+      //3. Get Languages
+      const res2 = await fetch(`${backendUrl}/languages/languages`);
+      const data2 = await res2.json();
+      console.log("languages:", data2);
+      setLanguages(data2);
+
+      setLoading(false);
     }
 
-    const newModel = {
-      id: Date.now(), // Unique key for React
-      name: modelName.trim(),
-      language: selectedLang,
-      fileName: pickleFile.name, // Storing the name for display
-    };
+    init();
+  }, []);
 
-    setModels((prev) => [...prev, newModel]);
-
-    // Reset all fields and close
-    setModelName("");
-    setSelectedLang("");
-    setPickleFile(null);
-    setShowModal(false);
+  async function reget() {
+    setLoading(true);
+    const res = await fetch(`${backendUrl}/models/models`);
+    const data = await res.json();
+    console.log("models:", data);
+    setModels(data);
+    const res2 = await fetch(`${backendUrl}/languages/languages`);
+    const data2 = await res2.json();
+    console.log("languages:", data2);
+    setLanguages(data2);
+    setLoading(false);
   };
+
+  const handleDelete = async (mid,uid, model_file) => {
+      if (uid !== userId) {
+        setShowError(true);
+        return;
+      }
+
+      try {
+          const response = await fetch(`${backendUrl}/models/${mid}`, {
+              method: 'DELETE',
+              headers: {
+                    'Content-Type': 'application/json', // <--- This is the missing piece!
+              },
+              body:JSON.stringify({
+                  model_file: model_file,
+              }),
+          });
+          if (response.ok) {
+              setModels(prev => prev.filter(m => m.mid !== mid));
+              setModelDeleting(null); 
+              toast.success("Model deleted successfully");
+          } else {
+              const err = await response.json();
+              toast.error(`Error: ${err.error}`);
+          }
+      } catch (err) {
+          console.error("Delete failed:", err);
+      }
+  };
+
+const extractBaseMidFromPickle = (pickleFile) => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const buffer = e.target.result;
+        const bytes = new Uint8Array(buffer);
+        const text = new TextDecoder('latin1').decode(bytes);
+
+        // Find "base_mid" key in the pickle binary text
+        const key = 'base_mid';
+        const keyIndex = text.indexOf(key);
+        if (keyIndex === -1) {
+          resolve(null);
+          return;
+        }
+
+        // After the key, pickle encodes the next string value with a length-prefixed short string
+        // Format: ... \x8c<len_byte><string> ...
+        let i = keyIndex + key.length;
+        while (i < bytes.length) {
+          // 0x8c = SHORT_BINUNICODE opcode (string up to 255 chars)
+          if (bytes[i] === 0x8c) {
+            const strLen = bytes[i + 1];
+            const value = new TextDecoder('utf-8').decode(
+              bytes.slice(i + 2, i + 2 + strLen)
+            );
+            resolve(value);
+            return;
+          }
+          i++;
+        }
+        resolve(null);
+      } catch {
+        resolve(null);
+      }
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsArrayBuffer(pickleFile);
+  });
+};
+
+  const handleSave = async (e) => {
+      e.preventDefault();
+    if (!modelName.trim() || !selectedLang || !pickleFile) {
+      toast.error("Please provide a name, select a language, and upload a file.");
+      return;
+    }
+    if (modelName.trim()) {
+      try {
+          const base_mid = await extractBaseMidFromPickle(pickleFile);
+          if (!base_mid) {
+            toast.error("Could not extract base_mid from the pickle file.");
+            return;
+          }
+          console.log(base_mid);
+          const response = await fetch(`${backendUrl}/models/addModel`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  userId:userId,
+                  lid: selectedLang,
+                  base_mid:base_mid,
+                  modelName: modelName,
+                  fileContent:pickleFile,
+              })
+          });
+          const result = await response.json();
+
+          if (result.success) {
+              toast.success("Added successfully!");
+              setShowModal(false);
+              setModelName("");
+              setSelectedLang(null);
+              setSelectedLangName(null);
+              setPickleFile(null);
+              reget();
+          } else {
+              throw new Error(result.message);
+          }
+      } catch (err) {
+          toast.error("ERROR: " + err.message);
+      }
+    }
+  };
+
+  if (loading) return (<div style={s.page}>
+                        <style>{`        
+                        .loader-overlay {
+                          position: fixed;
+                          top: 0;
+                          left: 0;
+                          width: 100vw;
+                          height: 100vh;
+                          display: flex;
+                          justify-content: center;
+                          align-items: center;
+                          z-index: 9999; /* Ensures it stays on top */
+                        }
+
+                        /* The themed spinner */
+                        .main-spinner {
+                          width: 80px;
+                          height: 80px;
+                          border: 5px solid #28568b;
+                          border-radius: 50%;
+                          border-top-color: #deeaea;
+                          animation: spin 1s linear infinite;
+                        }
+
+                        @keyframes spin { 
+                          to { transform: rotate(360deg); } 
+                        `}
+                        </style>
+                        <div className="loader-overlay">
+                          <div className="main-spinner"></div>
+                        </div>
+                      </div>);
+
+
   return (
     <div style={s.page}>
       <style>{`
@@ -86,28 +287,34 @@ export default function ModelsPage() {
         body { font-family: 'DM Sans', sans-serif; background: #f7f8fc; }
         input::placeholder { color: #a0aec0; }
         input:focus { outline: none; }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(12px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(24px) scale(0.97); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        .lang-card { animation: fadeUp 0.4s ease both; transition: 0.2s ease; }
-        .lang-card:nth-child(2) { animation-delay: 0.07s; }
-        .lang-card:nth-child(3) { animation-delay: 0.14s; }
-        .add-data-btn:hover { background: #047857 !important; }
-        .add-lang-btn:hover { background: #0f3460 !important; transform: translateY(-1px); }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .sub-item { animation: fadeUp 0.35s ease both; }
+        .sub-item:nth-child(2) { animation-delay: 0.05s; }
+        .sub-item:nth-child(3) { animation-delay: 0.10s; }
+        .sub-item:nth-child(4) { animation-delay: 0.15s; }
+        .action-btn:hover { background: #0f3460 !important; transform: translateY(-1px); }
+        .upload-btn:hover { background: rgba(226,185,111,0.12) !important; transform: translateY(-1px); }
+        .delete-btn:hover { background: rgba(239,68,68,0.15) !important; color: #ef4444 !important; }
+        .delete-btn2:hover { background: #af1d1d !important; }
+        .delete-data-btn:hover{background:rgb(148, 35, 35) !important;}
+        .close-btn:hover { background: #f0f0f0 !important; }
         .save-btn:hover { background: #0f3460 !important; }
+        .cancel-btn:hover { background: #e2e8f0 !important; }
+        .info-clickable-area:hover { background-color: rgba(0, 123, 255, 0.1); max-width: 120px; text-decoration: none;}
         .logout-item:hover { background: #fff5f5 !important; color: #c0392b !important; }
         .dropdown-item:hover { background: #f7f8fc !important; }
-        .delete-data-btn:hover { background: #ba1a08 !important; }
-        .close-btn:hover { background: #f0f0f0 !important; }
+        .select-item:hover { background: #f7f8fc !important; }
+        .modal-overlay { animation: fadeIn 0.2s ease; }
+        .modal-box { animation: slideUp 0.25s ease; }
+        input[type="file"]::file-selector-button {
+          padding: 6px 12px; border-radius: 8px; border: none;
+          background: #1a1a2e; color: #e2b96f; cursor: pointer;
+          font-family: 'DM Sans', sans-serif; font-size: 12px;
+          margin-right: 10px;
+        }
       `}</style>
 
       <nav style={s.nav}>
@@ -118,8 +325,8 @@ export default function ModelsPage() {
 
         <div style={s.userArea} ref={dropdownRef}>
           <button style={s.userPill} onClick={() => setDropdownOpen(o => !o)}>
-            <div style={s.avatar}>{mockUser.initials}</div>
-            <span style={s.userName}>{mockUser.name}</span>
+            <div style={s.avatar}>{user?.initials}</div>
+            <span style={s.userName}>{user?.username}</span>
             <span style={{ color: '#a0aec0', fontSize: '11px', marginLeft: '4px' }}>
               {dropdownOpen ? '▲' : '▼'}
             </span>
@@ -128,10 +335,10 @@ export default function ModelsPage() {
           {dropdownOpen && (
             <div style={s.dropdown}>
               <div style={s.dropdownHeader}>
-                <div style={{ ...s.avatar, width: '36px', height: '36px', fontSize: '13px' }}>{mockUser.initials}</div>
+                <div style={{ ...s.avatar, width: '36px', height: '36px', fontSize: '13px' }}>{user?.initials}</div>
                 <div>
-                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a2e' }}>{mockUser.name}</div>
-                  <div style={{ fontSize: '11px', color: '#a0aec0' }}>alex@example.com</div>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a2e' }}>{user?.username}</div>
+                  <div style={{ fontSize: '11px', color: '#b4b4b4' }}>{userEmail}</div>
                 </div>
               </div>
               <div style={s.dropdownDivider} />
@@ -171,28 +378,33 @@ export default function ModelsPage() {
         </div>
 
         <div style={s.grid}>
-          {models.map((model, i) => (
-            <div key={model.id || `${model.name}-${i}`} className="lang-card" style={{ ...s.card, ...s.cardHover }}>
+        {models
+          .filter((model) => model.mid !== 0) // Remove models where mid is 0
+          .map((model, i) => (
+            <div key={model.mid || `${model.model_name}-${i}`} className="lang-card" style={{ ...s.card, ...s.cardHover }}>
               <div style={s.cardAccent} />
-              <div style={s.cardIcon}>
-                {model.name ? model.name.charAt(0) : "M"} 
-              </div>
-              <h2 style={s.cardTitle}>{model.name}</h2>
-              <p style={s.cardMeta}>{model.language}</p>
-              <div style={s.cardButtons}>
-                <button onClick={(e) => { e.stopPropagation(); router.push(`/models/${model.name}`); }} className="add-data-btn" style={s.addDataBtn}>
-                  Fine tune
-                </button>
+              <div style={s.cardHeader}>
+                <div style={s.cardIcon}>
+                  {model.model_name ? model.model_name.charAt(0) : "M"}
+                </div>
                 <button
                     className="delete-data-btn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(model.name);
+                      setShowDeleteModal(true);
+                      setModelDeleting(model);
                     }}
                     style={s.deleteBtn}
                   >
-                    Delete
-                  </button>
+                    <Image src={trash} alt="delete" width="18" height="18" />
+                </button> 
+              </div>
+              <h2 style={s.cardTitle}>{model.model_name}</h2>
+              <p style={s.cardMeta}>{model.language_name}</p>
+              <div style={s.cardButtons}>
+                <button onClick={(e) => { e.stopPropagation(); router.push(`/models/${model.mid}?modelId=${model.mid}`); }} className="add-data-btn" style={s.addDataBtn}>
+                  Fine tune
+                </button>
                 </div>
             </div>
           ))}
@@ -203,15 +415,29 @@ export default function ModelsPage() {
       {showModal && (
         <div style={s.overlay} onClick={() => setShowModal(false)}>
           <div style={s.modal} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
             <div style={s.modalHeader}>
               <div>
                 <h2 style={s.modalTitle}>Upload Model</h2>
                 <p style={s.modalSub}>Configure your model details and upload the pickle file.</p>
               </div>
-              <button style={s.closeBtn} onClick={() => {setModelName(""); setSelectedLang(""); setPickleFile(null); setShowModal(false);}}>✕</button>
+              <button
+                className="close-btn"
+                style={s.closeBtn}
+                onClick={() => {
+                  setModelName("");
+                  setSelectedLang("");
+                  setPickleFile(null);
+                  setShowModal(false);
+                }}
+              >
+                ✕
+              </button>
             </div>
 
             <form style={s.form} onSubmit={e => e.preventDefault()}>
+
               {/* Model Name */}
               <div style={s.fieldGroup}>
                 <label style={s.label}>Model Name</label>
@@ -220,59 +446,71 @@ export default function ModelsPage() {
                   value={modelName}
                   onChange={e => setModelName(e.target.value)}
                   style={s.input}
+                  onFocus={e => Object.assign(e.target.style, { borderColor: '#0f3460', boxShadow: '0 0 0 3px rgba(15,52,96,0.08)' })}
+                  onBlur={e => Object.assign(e.target.style, { borderColor: '#e2e8f0', boxShadow: 'none' })}
                 />
               </div>
 
-              {/* Language Selection */}
+              {/* Language — loops over state languages, value = lid */}
               <div style={s.fieldGroup}>
                 <label style={s.label}>Language</label>
-                <select 
-                  value={selectedLang} 
-                  onChange={e => setSelectedLang(e.target.value)}
-                  style={{...s.input, appearance: 'none', background: '#fff'}}
-                >
-                  <option value="" disabled>Select a language</option>
-                  <option value="Arabic">Arabic</option>
-                  <option value="English">English</option>
-                  <option value="French">French</option>
-                  {/* Add more options as needed */}
-                </select>
+                {/* Use the NEW ref here */}
+                <div style={s.userArea} ref={languageRef}> 
+                  <button style={{...s.userPill, minWidth: "200px", justifyContent: "space-between"}} onClick={() => setDropdown2Open(o => !o)}>
+                    <span style={s.userName}>{selectedLangName? selectedLangName : "Select a language"}</span>
+                    <span>{dropdown2Open ? '▲' : '▼'}</span>
+                  </button>
+                  
+                  {dropdown2Open && (
+                    <div style={s.dropdown2}>
+                      {languages.map(lang => (
+                        //<div key={lang.lid} style={s.dropdownDivider}>
+                        <div key={lang.lid}>
+                          {/* FIXED: Added arrow function wrapper */}
+                          <button 
+                            onClick={() => {setSelectedLang(lang.lid); setDropdown2Open(false); setSelectedLangName(lang.language_name)}} 
+                            className="dropdown-item" 
+                            style={s.dropdownItem}
+                          >
+                            {lang.language_name}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* File Upload */}
+              {/* Pickle file */}
               <div style={s.fieldGroup}>
                 <label style={s.label}>Pickle File (.pkl)</label>
-                <div style={{ position: 'relative' }}>
+                <div style={s.fileArea}>
                   <input
                     type="file"
                     accept=".pkl,.pickle"
-                    onChange={(e) => setPickleFile(e.target.files)}
-                    style={{
-                      ...s.input,
-                      paddingTop: '8px',
-                      cursor: 'pointer'
-                    }}
+                    onChange={e => setPickleFile(e.target.files?.[0] ?? null)}
+                    style={{ fontSize: 13, color: '#4a5568', width: '100%', cursor: 'pointer' }}
                   />
+                  {pickleFile && (
+                    <p style={s.fileName}>✓ {pickleFile.name}</p>
+                  )}
                 </div>
-                {pickleFile && (
-                  <p style={{ fontSize: '12px', color: '#10b981', marginTop: '4px' }}>
-                    ✓ Selected: {pickleFile.name}
-                  </p>
-                )}
               </div>
 
+              {/* Submit */}
               <button
                 className="save-btn"
                 style={{
                   ...s.saveBtn,
-                  opacity: (!modelName.trim() || !selectedLang || !pickleFile) ? 0.6 : 1,
-                  cursor: (!modelName.trim() || !selectedLang || !pickleFile) ? 'not-allowed' : 'pointer'
+                  opacity: (!modelName.trim() || !selectedLang || !pickleFile) ? 0.5 : 1,
+                  cursor: (!modelName.trim() || !selectedLang || !pickleFile) ? 'not-allowed' : 'pointer',
                 }}
                 onClick={handleSave}
                 disabled={!modelName.trim() || !selectedLang || !pickleFile}
               >
                 Upload & Save
               </button>
+
             </form>
           </div>
         </div>
@@ -295,8 +533,8 @@ export default function ModelsPage() {
                 <label style={s.label}>Model Name</label>
                 <input
                   placeholder="e.g. Arabic-Sign-v1"
-                  value={modelName}
-                  onChange={e => setModelName(e.target.value)}
+                  value={trainModelName}
+                  onChange={e => setTrainModelName(e.target.value)}
                   style={s.input}
                 />
               </div>
@@ -304,26 +542,12 @@ export default function ModelsPage() {
               {/* Folder Upload */}
               <div style={s.fieldGroup}>
                 <label style={s.label}>Training Data Directory</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="file"
-                    /* These three attributes enable folder selection */
-                    webkitdirectory="true"
-                    directory="true"
-                    multiple
-                    onChange={(e) => setTrainFiles(e.target.files)}
-                    style={{
-                      ...s.input,
-                      paddingTop: '8px',
-                      cursor: 'pointer'
-                    }}
-                  />
-                </div>
-                {trainFiles && (
-                  <p style={{ fontSize: '12px', color: '#10b981', marginTop: '4px' }}>
-                    ✓ Folder linked: {trainFiles.length} files detected
-                  </p>
-                )}
+                <input
+                  placeholder="Paste folder path: D:/Data/Batch1"
+                  value={manualPath}
+                  onChange={(e) => setManualPath(e.target.value)}
+                  style={s.input}
+                />
               </div>
 
               <button
@@ -331,16 +555,70 @@ export default function ModelsPage() {
                 style={{
                   ...s.saveBtn,
                   // Updated validation check
-                  opacity: (!modelName.trim() || !trainFiles) ? 0.6 : 1,
-                  cursor: (!modelName.trim() || !trainFiles) ? 'not-allowed' : 'pointer',
+                  opacity: (!trainModelName.trim()) ? 0.6 : 1,
+                  cursor: 'pointer',
                   backgroundColor: '#6366f1' // Different color to distinguish "Train" from "Save"
                 }}
                 onClick={handleTrainSubmit}
-                disabled={!modelName.trim() || !trainFiles}
-              >
-                Start Training
-              </button>
+                disabled={!trainModelName.trim()}
+                >
+                    {training ? 'Training...' : 'Start Training'}
+                </button>
             </form>
+          </div>
+        </div>
+      )}      
+      {/* ERROR MODAL */}
+      {showError && (
+        <div className="modal-overlay" style={s.overlay} onClick={() => setShowError(false)}>
+          <div className="modal-box" style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div style={s.modalIconWrap}>
+                <span style={{ fontSize: 22 }}>⚠️</span>
+              </div>
+              <button className="close-btn" style={s.closeBtn} onClick={() => setShowError(false)}>✕</button>
+            </div>
+            <h2 style={s.modalTitle}>Permission Error</h2>
+            <p style={s.modalBody}>
+              You are not the owner of one or more selected language. You can only merge/delete Languages that belong to you.
+            </p>
+            <button
+              style={{ ...s.saveBtn, background: '#dc2626', marginTop: 8 }}
+              onClick={() => setShowError(false)}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}  
+      {/* Confirm Delete MODAL */}
+      {showDeleteModal && (
+        <div className="modal-overlay" style={s.overlay} onClick={() => setShowDeleteModal(false)}>
+          <div className="modal-box" style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div style={s.modalIconWrap}>
+                <span style={{ fontSize: 22 }}>⚠️</span>
+              </div>
+              <button className="close-btn" style={s.closeBtn} onClick={() => setShowDeleteModal(false)}>✕</button>
+            </div>
+            <h2 style={s.modalTitle}>Deleting</h2>
+            <p style={s.modalBody}>
+              Are you sure you want to delete this submission? This action cannot be undone.
+            </p>
+            <button
+              className="delete-btn2"
+              style={{ ...s.deleteBtn2, marginTop: 8 , marginRight: 20}}
+              onClick={() => {setShowDeleteModal(false); handleDelete(modelDeleting?.mid, modelDeleting?.uid, modelDeleting?.model_file);}}
+            >
+              Delete
+            </button>
+            <button
+              className="cancel-btn"
+              style={{ ...s.cancelBtn, marginTop: 8 }}
+              onClick={() => setShowDeleteModal(false)}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -437,6 +715,20 @@ const s = {
     animation: 'fadeIn 0.15s ease',
     zIndex: 100,
   },
+
+  dropdown2: {
+    position: 'absolute',
+    top: 'calc(100%)',
+    background: '#ffffff',
+    borderRadius: '16px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+    border: '1px solid #edf0f7',
+    minWidth: '200px',
+    overflow: 'hidden',
+    animation: 'fadeIn 0.15s ease',
+    zIndex: 100,
+  },
+
   dropdownHeader: {
     display: 'flex',
     alignItems: 'center',
@@ -472,11 +764,16 @@ const s = {
   },
 
   deleteBtn: {
-    backgroundColor: "#dc2626",
+    backgroundColor: 'rgb(215 50 50)',
     color: "white",
     border: "none",
     padding: "8px 12px",
-    borderRadius: "6px",
+    borderRadius: "6px",    
+    height: '30px',
+    display: 'flex',
+    width: '30px',
+    justifyContent: 'center',
+    alignItems:'center',
     cursor: "pointer",
     transition: 'background 0.2s, transform 0.15s',
   },
@@ -551,8 +848,12 @@ const s = {
     height: '3px',
     background: 'linear-gradient(90deg, #1a1a2e, #e2b96f)',
   },
+  cardHeader:{
+    display:'flex',
+    justifyContent: 'space-between',
+  },
   cardIcon: {
-    width: '44px',
+    width:'44px',
     height: '44px',
     borderRadius: '12px',
     background: 'linear-gradient(135deg, #1a1a2e, #0f3460)',
@@ -593,87 +894,69 @@ const s = {
 
   /* MODAL */
   overlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(10,10,20,0.45)',
+    position: 'fixed', inset: 0,
+    background: 'rgba(10,15,30,0.45)',
     backdropFilter: 'blur(6px)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 50,
-    animation: 'fadeIn 0.2s ease',
   },
   modal: {
-    background: '#ffffff',
-    borderRadius: '24px',
-    width: '100%',
-    maxWidth: '400px',
+    background: '#ffffff', borderRadius: '24px',
+    width: '100%', maxWidth: '420px',
     padding: '32px',
     boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-    animation: 'slideUp 0.3s ease',
   },
   modalHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '28px',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    marginBottom: '20px',
+  },
+  modalIconWrap: {
+    width: 44, height: 44, borderRadius: '12px',
+    background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   modalTitle: {
     fontFamily: "'Playfair Display', serif",
-    fontSize: '22px',
-    fontWeight: 600,
-    color: '#1a1a2e',
-    marginBottom: '4px',
+    fontSize: '22px', fontWeight: 600, color: '#1a1a2e', marginBottom: '4px',
   },
-  modalSub: {
-    fontSize: '13px',
-    color: '#a0aec0',
-    fontWeight: 300,
-  },
+  modalSub: { fontSize: '13px', color: '#a0aec0', fontWeight: 300 },
+  modalBody: { fontSize: '14px', color: '#4a5568', lineHeight: 1.6, marginBottom: '4px' },
   closeBtn: {
-    width: '34px',
-    height: '34px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#f7f8fc',
-    cursor: 'pointer',
-    fontSize: '13px',
-    color: '#7a8499',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'background 0.2s',
-    flexShrink: 0,
+    width: 34, height: 34, borderRadius: '50%',
+    border: 'none', background: '#f7f8fc',
+    cursor: 'pointer', fontSize: '13px', color: '#7a8499',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'background 0.2s', flexShrink: 0,
   },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-  },
-  fieldGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  label: {
-    fontSize: '13px',
-    fontWeight: 500,
-    color: '#4a5568',
-    letterSpacing: '0.3px',
-  },
+  form: { display: 'flex', flexDirection: 'column', gap: '20px' },
+  fieldGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  label: { fontSize: '13px', fontWeight: 500, color: '#4a5568', letterSpacing: '0.3px' },
   input: {
-    padding: '13px 16px',
-    borderRadius: '12px',
-    border: '1.5px solid #e2e8f0',
-    fontSize: '14px',
-    color: '#1a202c',
-    background: '#fafbfc',
+    padding: '13px 16px', borderRadius: '12px',
+    border: '1.5px solid #e2e8f0', fontSize: '14px',
+    color: '#1a202c', background: '#fafbfc',
     transition: 'border-color 0.2s, box-shadow 0.2s',
     fontFamily: "'DM Sans', sans-serif",
   },
-  inputFocus: {
-    borderColor: '#0f3460',
-    boxShadow: '0 0 0 3px rgba(15,52,96,0.08)',
+  inputFocus: { borderColor: '#0f3460', boxShadow: '0 0 0 3px rgba(15,52,96,0.08)' },
+  fileArea: {
+    padding: '14px 16px', borderRadius: '12px',
+    border: '1.5px dashed #e2e8f0', background: '#fafbfc',
+  },
+  fileName: { marginTop: '8px', fontSize: '12px', color: '#059669' },
+  modalActions: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  deleteBtn2: {
+    padding: '13px', background: '#dc2626', color: '#ffffff',
+    border: 'none', borderRadius: '12px',
+    fontSize: '14.5px', fontWeight: 500, cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+  cancelBtn: {
+    padding: '12px', background: '#f1f5f9', color: '#4a5568',
+    border: 'none', borderRadius: '12px',
+    fontSize: '14px', cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
   },
   saveBtn: {
     padding: '14px',
@@ -687,4 +970,100 @@ const s = {
     transition: 'background 0.2s',
     fontFamily: "'DM Sans', sans-serif",
   },
+    overlay: {
+    position: 'fixed', inset: 0,
+    background: 'rgba(10,15,30,0.50)',
+    backdropFilter: 'blur(6px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 50,
+    animation: 'fadeIn 0.2s ease',
+    padding: 24,
+  },
+  modal: {
+    background: '#ffffff',
+    borderRadius: 24,
+    width: '100%', maxWidth: 440,
+    padding: 32,
+    boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+    animation: 'slideUp 0.25s ease',
+  },
+  modalHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    marginBottom: 28,
+  },
+  modalTitle: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 22, fontWeight: 600, color: '#1a1a2e', marginBottom: 4,
+  },
+  modalSub: {
+    fontSize: 13, color: '#a0aec0', fontWeight: 300,
+  },
+  closeBtn: {
+    width: 34, height: 34, borderRadius: '50%',
+    border: 'none', background: '#f7f8fc',
+    cursor: 'pointer', fontSize: 13, color: '#7a8499',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'background 0.2s', flexShrink: 0,
+  },
+  form: {
+    display: 'flex', flexDirection: 'column', gap: 20,
+  },
+  fieldGroup: {
+    display: 'flex', flexDirection: 'column', gap: 8,
+  },
+  label: {
+    fontSize: 13, fontWeight: 500, color: '#4a5568', letterSpacing: '0.3px',
+  },
+  input: {
+    padding: '13px 16px',
+    borderRadius: 12,
+    border: '1.5px solid #e2e8f0',
+    fontSize: 14,
+    color: '#1a202c',
+    background: '#fafbfc',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+    width: '100%',
+  },
+  // Use this for the <select> — merges with `input` so apply both
+  select: {
+    padding: '13px 16px',
+    borderRadius: 13,
+    border: '0.5px solid #e2e8f0',
+    fontSize: 14,
+    background: 'transparent',
+    fontFamily: "'DM Sans', sans-serif",
+    width: '100%',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    backgroundPosition: 'right 16px center',
+    paddingRight: 40,
+    fontSize: '13.5px',
+    color: '#4a5568',
+    transition: 'background 0.15s, color 0.15s',
+    cursor:'pointer',
+  },
+  fileArea: {
+    padding: '14px 16px',
+    borderRadius: 12,
+    border: '1.5px dashed #e2e8f0',
+    background: '#fafbfc',
+    cursor: 'pointer',
+  },
+  fileName: {
+    marginTop: 8, fontSize: 12, color: '#059669',
+  },
+  saveBtn: {
+    padding: 14,
+    background: '#1a1a2e',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: 12,
+    fontSize: 14.5, fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+    marginTop: 4,
+  },
+
 };

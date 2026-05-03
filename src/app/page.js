@@ -2,17 +2,25 @@
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import logo from "./assets/logo.png";
+import trash from "./assets/trash.png";
 import {useRouter} from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+import toast from "react-hot-toast";
 
-
-const mockUser = { name: "Ahmed Ashry", initials: "AA" };
 
 export default function LanguagesPage() {
   const router = useRouter();
+  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
+  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
+  const [userId, setUserId] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [languageDeleting, setLanguageDeleting] = useState(null);
+  const [showError, setShowError] = useState(false);
   const [langName, setLangName] = useState("");
-  const languagesTemp = ["Arabic", "English", "Spanish"];
-  const [languages, setLanguages] = useState(languagesTemp);
+  const [languages, setLanguages] = useState([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -26,27 +34,130 @@ export default function LanguagesPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleSave = () => {
-    if (langName.trim()) {
-      setLanguages((prev) => [...prev, langName.trim()]);// In a real app, you'd also update the backend here
-      setLangName("");
-      setShowModal(false);
-      router.push("/recording");
+  useEffect(() => {
+    async function init() {
+      setLoading(true);
+
+      // 1. Get model brief first
+      const res = await fetch(`${backendUrl}/languages/languages`);
+      const data = await res.json();
+      console.log("languages:", data);
+      setLanguages(data);
+
+      // 2. Get user
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserEmail(user.email);
+      setUserId(user.id);
+      console.log("Authenticated user:", user);
+      const userRes = await fetch(`${backendUrl}/profile/info?userId=${user.id}`);
+      const userData = await userRes.json();
+      setUser(userData[0]);
+      console.log("Profile info:", userData);
+
+      setLoading(false);
     }
-  }
 
-  const handleDelete = (lang) => {
-    const confirmDelete = confirm(
-      `Are you sure you want to delete ${lang}?`
-    );
+    init();
+  }, []);
 
-    if (!confirmDelete) return;
-
-    alert("Delete language request sent to backend (mock)");
-
-    // Later:
-    // await fetch(`/api/languages/${lang}`, { method: "DELETE" })
+  async function reget() {
+    setLoading(true);
+    const res = await fetch(`${backendUrl}/languages/languages`);
+    const data = await res.json();
+    console.log("languages:", data);
+    setLanguages(data);
+    setLoading(false);
   };
+
+  const handleDelete = async (lid,uid) => {
+      if (uid !== userId) {
+        setShowError(true);
+        return;
+      }
+
+      try {
+          const response = await fetch(`${backendUrl}/languages/${lid}`, {
+              method: 'DELETE',
+          });
+          if (response.ok) {
+              setLanguages(prev => prev.filter(l => l.lid !== lid));
+              setLanguageDeleting(null); 
+              toast.success("Language deleted successfully");
+          } else {
+              const err = await response.json();
+              toast.error(`Error: ${err.error}`);
+          }
+      } catch (err) {
+          console.error("Delete failed:", err);
+      }
+  };
+
+  const handleSave = async (e) => {
+      e.preventDefault();
+      if (!langName.trim()) {
+          toast.error("Please provide a name.");
+          return;
+      }
+    if (langName.trim()) {
+      try {
+          const response = await fetch(`${backendUrl}/languages/addLanguage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  language_name: langName,
+                  uid: userId
+              })
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+              toast.success("Added successfully!");
+              setLangName("");
+              setShowModal(false);
+              reget();
+          } else {
+              throw new Error(result.message);
+          }
+      } catch (err) {
+          toast.error("ERROR: " + err.message);
+      }
+    }
+  };
+
+  if (loading) return (<div style={s.page}>
+                        <style>{`        
+                        .loader-overlay {
+                          position: fixed;
+                          top: 0;
+                          left: 0;
+                          width: 100vw;
+                          height: 100vh;
+                          display: flex;
+                          justify-content: center;
+                          align-items: center;
+                          z-index: 9999; /* Ensures it stays on top */
+                        }
+
+                        /* The themed spinner */
+                        .main-spinner {
+                          width: 80px;
+                          height: 80px;
+                          border: 5px solid #28568b;
+                          border-radius: 50%;
+                          border-top-color: #deeaea;
+                          animation: spin 1s linear infinite;
+                        }
+
+                        @keyframes spin { 
+                          to { transform: rotate(360deg); } 
+                        `}
+                        </style>
+                        <div className="loader-overlay">
+                          <div className="main-spinner"></div>
+                        </div>
+                      </div>);
+
 
   return (
     <div style={s.page}>
@@ -72,13 +183,19 @@ export default function LanguagesPage() {
         .lang-card:hover { transform: translateY(-6px); box-shadow: 0 15px 30px rgba(0,0,0,0.2) !important; }
         .lang-card:nth-child(2) { animation-delay: 0.07s; }
         .lang-card:nth-child(3) { animation-delay: 0.14s; }
+        .upload-btn:hover { background: rgba(226,185,111,0.12) !important; transform: translateY(-1px); }
         .add-data-btn:hover { background: #047857 !important; }
         .add-lang-btn:hover { background: #0f3460 !important; transform: translateY(-1px); }
         .save-btn:hover { background: #0f3460 !important; }
-        .logout-item:hover { background: #fff5f5 !important; color: #c0392b !important; }
-        .delete-data-btn:hover { background: #ba1a08 !important; }
-        .dropdown-item:hover { background: #f7f8fc !important; }
+        .delete-btn:hover { background: rgba(239,68,68,0.15) !important; color: #ef4444 !important; }
+        .delete-btn2:hover { background: #af1d1d !important; }
         .close-btn:hover { background: #f0f0f0 !important; }
+        .cancel-btn:hover { background: #e2e8f0 !important; }
+        .logout-item:hover { background: #fff5f5 !important; color: #c0392b !important; }
+        .delete-data-btn:hover{background:rgb(148, 35, 35) !important;}
+        .dropdown-item:hover { background: #f7f8fc !important; }
+        .modal-overlay { animation: fadeIn 0.2s ease; }
+        .modal-box { animation: slideUp 0.25s ease; }
       `}</style>
 
       <nav style={s.nav}>
@@ -89,8 +206,8 @@ export default function LanguagesPage() {
 
         <div style={s.userArea} ref={dropdownRef}>
           <button style={s.userPill} onClick={() => setDropdownOpen(o => !o)}>
-            <div style={s.avatar}>{mockUser.initials}</div>
-            <span style={s.userName}>{mockUser.name}</span>
+            <div style={s.avatar}>{user?.initials}</div>
+            <span style={s.userName}>{user?.username}</span>
             <span style={{ color: '#a0aec0', fontSize: '11px', marginLeft: '4px' }}>
               {dropdownOpen ? '▲' : '▼'}
             </span>
@@ -99,10 +216,10 @@ export default function LanguagesPage() {
           {dropdownOpen && (
             <div style={s.dropdown}>
               <div style={s.dropdownHeader}>
-                <div style={{ ...s.avatar, width: '36px', height: '36px', fontSize: '13px' }}>{mockUser.initials}</div>
+                <div style={{ ...s.avatar, width: '36px', height: '36px', fontSize: '13px' }}>{user?.initials}</div>
                 <div>
-                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a2e' }}>{mockUser.name}</div>
-                  <div style={{ fontSize: '11px', color: '#a0aec0' }}>alex@example.com</div>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a2e' }}>{user?.username}</div>
+                  <div style={{ fontSize: '11px', color: '#b4b4b4' }}>{userEmail}</div>
                 </div>
               </div>
               <div style={s.dropdownDivider} />
@@ -134,25 +251,30 @@ export default function LanguagesPage() {
 
         <div style={s.grid}>
           {languages.map((lang, i) => (
-            <div key={lang} className="lang-card" style={{ ...s.card, ...s.cardHover }} onClick={() => router.push(`/languages/${lang}`)}>
+            <div key={lang.lid} className="lang-card" style={{ ...s.card, ...s.cardHover }} onClick={() => router.push(`/languages/${lang.lid}?languageId=${lang.lid}`)}>
               <div style={s.cardAccent} />
-              <div style={s.cardIcon}>{lang.charAt(0)}</div>
-              <h2 style={s.cardTitle}>{lang}</h2>
+              <div style={s.cardHeader}>
+                <div style={s.cardIcon}>
+                  {lang.language_name ? lang.language_name.charAt(0) : "D"}
+                </div>
+                <button
+                    className="delete-data-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDeleteModal(true);
+                      setLanguageDeleting(lang);
+                    }}
+                    style={s.deleteBtn}
+                  >
+                    <Image src={trash} alt="delete" width="18" height="18" />
+                </button> 
+              </div>
+              <h2 style={s.cardTitle}>{lang.language_name}</h2>
               <p style={s.cardMeta}>Dataset module</p>
               <div style={s.cardButtons}>
                 <button onClick={(e) => { e.stopPropagation(); router.push("/recording"); }} className="add-data-btn" style={s.addDataBtn}>
                   Upload Data
                 </button>
-                <button
-                    className="delete-data-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(lang);
-                    }}
-                    style={s.deleteBtn}
-                  >
-                    Delete
-                  </button>
                 </div>
             </div>
           ))}
@@ -197,6 +319,60 @@ export default function LanguagesPage() {
                 Save Dataset
               </button>
             </form>
+          </div>
+        </div>
+      )}      
+      {/* ERROR MODAL */}
+      {showError && (
+        <div className="modal-overlay" style={s.overlay} onClick={() => setShowError(false)}>
+          <div className="modal-box" style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div style={s.modalIconWrap}>
+                <span style={{ fontSize: 22 }}>⚠️</span>
+              </div>
+              <button className="close-btn" style={s.closeBtn} onClick={() => setShowError(false)}>✕</button>
+            </div>
+            <h2 style={s.modalTitle}>Permission Error</h2>
+            <p style={s.modalBody}>
+              You are not the owner of one or more selected language. You can only merge/delete Languages that belong to you.
+            </p>
+            <button
+              style={{ ...s.saveBtn, background: '#dc2626', marginTop: 8 }}
+              onClick={() => setShowError(false)}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}      
+      {/* Confirm Delete MODAL */}
+      {showDeleteModal && (
+        <div className="modal-overlay" style={s.overlay} onClick={() => setShowDeleteModal(false)}>
+          <div className="modal-box" style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div style={s.modalIconWrap}>
+                <span style={{ fontSize: 22 }}>⚠️</span>
+              </div>
+              <button className="close-btn" style={s.closeBtn} onClick={() => setShowDeleteModal(false)}>✕</button>
+            </div>
+            <h2 style={s.modalTitle}>Deleting</h2>
+            <p style={s.modalBody}>
+              Are you sure you want to delete this submission? This action cannot be undone.
+            </p>
+            <button
+              className="delete-btn2"
+              style={{ ...s.deleteBtn2, marginTop: 8 , marginRight: 20}}
+              onClick={() => {setShowDeleteModal(false); handleDelete(languageDeleting?.lid, languageDeleting?.uid);}}
+            >
+              Delete
+            </button>
+            <button
+              className="cancel-btn"
+              style={{ ...s.cancelBtn, marginTop: 8 }}
+              onClick={() => setShowDeleteModal(false)}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -329,14 +505,20 @@ const s = {
   },
 
   deleteBtn: {
-    backgroundColor: "#dc2626",
+    backgroundColor: 'rgb(215 50 50)',
     color: "white",
     border: "none",
     padding: "8px 12px",
-    borderRadius: "6px",
+    borderRadius: "6px",    
+    height: '30px',
+    display: 'flex',
+    width: '30px',
+    justifyContent: 'center',
+    alignItems:'center',
     cursor: "pointer",
     transition: 'background 0.2s, transform 0.15s',
   },
+
 
   cardButtons: {
     display: "flex",
@@ -406,8 +588,12 @@ const s = {
     height: '3px',
     background: 'linear-gradient(90deg, #1a1a2e, #e2b96f)',
   },
+  cardHeader:{
+    display:'flex',
+    justifyContent: 'space-between',
+  },
   cardIcon: {
-    width: '44px',
+    width:'44px',
     height: '44px',
     borderRadius: '12px',
     background: 'linear-gradient(135deg, #1a1a2e, #0f3460)',
@@ -448,87 +634,76 @@ const s = {
 
   /* MODAL */
   overlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(10,10,20,0.45)',
+    position: 'fixed', inset: 0,
+    background: 'rgba(10,15,30,0.45)',
     backdropFilter: 'blur(6px)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 50,
-    animation: 'fadeIn 0.2s ease',
   },
   modal: {
-    background: '#ffffff',
-    borderRadius: '24px',
-    width: '100%',
-    maxWidth: '400px',
+    background: '#ffffff', borderRadius: '24px',
+    width: '100%', maxWidth: '420px',
     padding: '32px',
     boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-    animation: 'slideUp 0.3s ease',
   },
   modalHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '28px',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    marginBottom: '20px',
+  },
+  modalIconWrap: {
+    width: 44, height: 44, borderRadius: '12px',
+    background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   modalTitle: {
     fontFamily: "'Playfair Display', serif",
-    fontSize: '22px',
-    fontWeight: 600,
-    color: '#1a1a2e',
-    marginBottom: '4px',
+    fontSize: '22px', fontWeight: 600, color: '#1a1a2e', marginBottom: '4px',
   },
-  modalSub: {
-    fontSize: '13px',
-    color: '#a0aec0',
-    fontWeight: 300,
-  },
+  modalSub: { fontSize: '13px', color: '#a0aec0', fontWeight: 300 },
+  modalBody: { fontSize: '14px', color: '#4a5568', lineHeight: 1.6, marginBottom: '4px' },
   closeBtn: {
-    width: '34px',
-    height: '34px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#f7f8fc',
-    cursor: 'pointer',
-    fontSize: '13px',
-    color: '#7a8499',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'background 0.2s',
-    flexShrink: 0,
+    width: 34, height: 34, borderRadius: '50%',
+    border: 'none', background: '#f7f8fc',
+    cursor: 'pointer', fontSize: '13px', color: '#7a8499',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'background 0.2s', flexShrink: 0,
   },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-  },
-  fieldGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  label: {
-    fontSize: '13px',
-    fontWeight: 500,
-    color: '#4a5568',
-    letterSpacing: '0.3px',
-  },
+  form: { display: 'flex', flexDirection: 'column', gap: '20px' },
+  fieldGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  label: { fontSize: '13px', fontWeight: 500, color: '#4a5568', letterSpacing: '0.3px' },
   input: {
-    padding: '13px 16px',
-    borderRadius: '12px',
-    border: '1.5px solid #e2e8f0',
-    fontSize: '14px',
-    color: '#1a202c',
-    background: '#fafbfc',
+    padding: '13px 16px', borderRadius: '12px',
+    border: '1.5px solid #e2e8f0', fontSize: '14px',
+    color: '#1a202c', background: '#fafbfc',
     transition: 'border-color 0.2s, box-shadow 0.2s',
     fontFamily: "'DM Sans', sans-serif",
   },
-  inputFocus: {
-    borderColor: '#0f3460',
-    boxShadow: '0 0 0 3px rgba(15,52,96,0.08)',
+  inputFocus: { borderColor: '#0f3460', boxShadow: '0 0 0 3px rgba(15,52,96,0.08)' },
+  fileArea: {
+    padding: '14px 16px', borderRadius: '12px',
+    border: '1.5px dashed #e2e8f0', background: '#fafbfc',
+  },
+  fileName: { marginTop: '8px', fontSize: '12px', color: '#059669' },
+  modalActions: { display: 'flex', flexDirection: 'column', gap: '10px' },
+/*   saveBtn: {
+    padding: '13px', background: '#1a1a2e', color: '#ffffff',
+    border: 'none', borderRadius: '12px',
+    fontSize: '14.5px', fontWeight: 500, cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+  }, */
+  deleteBtn2: {
+    padding: '13px', background: '#dc2626', color: '#ffffff',
+    border: 'none', borderRadius: '12px',
+    fontSize: '14.5px', fontWeight: 500, cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
+  cancelBtn: {
+    padding: '12px', background: '#f1f5f9', color: '#4a5568',
+    border: 'none', borderRadius: '12px',
+    fontSize: '14px', cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
   },
   saveBtn: {
     padding: '14px',

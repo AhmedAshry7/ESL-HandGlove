@@ -1,37 +1,40 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import logo from "../../assets/logo.png";
-
-
-const mockSubmissions = [
-  { id: "1", name: "Session 1", language: "Arabic", owner: "me", signs: ["I", "Thank you", "Hello", "Bread", "Water", "Family"] },
-  { id: "2", name: "Session 2", language: "Arabic", owner: "me", signs: ["School", "Work", "Friend", "Happy"] },
-  { id: "3", name: "Session 3", language: "Arabic", owner: "other", signs: ["I", "Hello", "How are you?"] },
-  { id: "4", name: "English Session 1", language: "English", owner: "me", signs: ["Yes", "No", "Please"] },
-];
-
-const mockUser = { name: "Ahmed Ashry", initials: "AA" };
+import toast from "react-hot-toast";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function SubmissionsPage() {
   const router = useRouter();
-  const params = useParams();
-  const language = params.language;
-
+  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
+  const searchParams = useSearchParams();
+  const [loading, setLoading] = useState(false);
+  const [modalLoading, setModalLoading] =useState(false);
+  const languageId = searchParams.get("languageId");
+  const [language, setLanguage] = useState(null);
+  const [submissions, setSubmissions] = useState([]);
+  const [user, setUser] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
+  const [userId, setUserId] = useState(null);
   const [selected, setSelected] = useState([]);
+  const [selectedSubmissions, setSelectedSubmissions] = useState([]);
   const [showError, setShowError] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [activeSubmission, setActiveSubmission] = useState(null);
   const [submissionName, setSubmissionName] = useState("");
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [hoveredId, setHoveredId] = useState(null);
+  const [submissionDeleting, setSubmissionDeleting] = useState(null);
+  const [mergedName, setMergedName] = useState("");
   const dropdownRef = useRef(null);
 
-  const submissions = mockSubmissions.filter((s) => s.language === language);
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -43,44 +46,240 @@ export default function SubmissionsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const toggleSelection = (e, id) => {
-    e.stopPropagation(); // Prevents the modal from opening when clicking the checkbox
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
+  useEffect(() => {
+      async function init() {
+        setLoading(true);
+
+        // 1. Get model brief first
+        const res = await fetch(`${backendUrl}/languages/languageInfo?languageId=${languageId}`);
+        const data = await res.json();
+        console.log("language info data:", data);
+        const fetchedLanguageName = data[0].language_name;
+        setLanguage(fetchedLanguageName);
+
+        // 2. Get user
+        const { data: { user } } = await supabase.auth.getUser();
+        setUserEmail(user.email);
+        setUserId(user.id);
+        console.log("Authenticated user:", user);
+        const userRes = await fetch(`${backendUrl}/profile/info?userId=${user.id}`);
+        const userData = await userRes.json();
+        setUser(userData[0]);
+        console.log("Profile info:", userData);
+
+        // 3. Now fetch submissions using the LOCAL variable, not state
+        const subRes = await fetch(
+          `${backendUrl}/submissions/language?languageId=${languageId}`
+        );
+        const subData = await subRes.json();
+        console.log("Fetched submissions:", subData);
+        setSubmissions(Array.isArray(subData) ? subData : []);
+
+        setLoading(false);
+      }
+
+      if (languageId) init(); // guard: don't run if languageId is still null
+    }, [languageId]);
+
+  async function reget() {
+      setLoading(true);
+      const subRes = await fetch(
+        `${backendUrl}/submissions/language?languageId=${languageId}`
+      );
+      const subData = await subRes.json();
+      console.log("Fetched submissions:", subData);
+      setSubmissions(Array.isArray(subData) ? subData : []);
+      setSelected([]);
+      setLoading(false);
+    };
+
+  const toggleSelection = (e, id, submission) => {
+      e.stopPropagation();
+
+      // 1. Update IDs state
+      setSelected((prev) =>
+        prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+      );
+
+      // 2. Update Submissions Objects state
+      // FIX: Remove { } so the result is automatically returned
+      setSelectedSubmissions((prev) =>
+        prev.includes(submission) ? prev.filter((item) => item !== submission) : [...prev, submission]
+      );
+
+      console.log("Toggled selection for ID:", id);
+    };
 
   const handleOpenView = (submission) => {
     setActiveSubmission(submission);
     setShowViewModal(true);
   };
 
-  const handleMerge = () => {
-    const selectedSubs = submissions.filter((s) => selected.includes(s.id));
-    const notOwned = selectedSubs.filter((s) => s.owner !== "me");
-    if (notOwned.length > 0) { setShowError(true); return; }
-    alert("Merge request sent to backend (mock)");
+  const handleDelete = async (sid,uid, readings_file) => {
+        if (uid !== userId) {
+          setShowError(true);
+          return;
+        }
+        try {
+            const response = await fetch(`${backendUrl}/submissions/${sid}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json', // <--- This is the missing piece!
+                },
+                body:JSON.stringify({
+                          readings_file: readings_file,
+                }),
+            });
+            setSelected(prev => prev.filter(id => id !== sid));
+            if (response.ok) {
+                setSubmissions(prev => prev.filter(s => s.sid !== sid));
+                setSubmissionDeleting(null);
+                toast.success("Submission deleted Successfully"); 
+            } else {
+                const err = await response.json();
+                toast.error(`Error: ${err.error}`);
+            }
+        } catch (err) {
+            console.error("Delete failed:", err);
+        }
+    };
+
+  const handleDownload = (selected) => {
+      if (!selected || selected.length === 0) return toast.error("Select items first");
+      console.log("Initiating download for IDs:", selected);
+      const idsParam = selected.join(',');
+      setSelected([]);
+      window.open(`${backendUrl}/submissions/download?ids=${idsParam}`, '_blank');
   };
 
-  const handleDownload = () => alert("Download request sent to backend (mock)");
+  const handleMerge = async (e) => {
+      e.preventDefault();
+      // 1. Ownership Validation
+      console.log("Selected for merge:", selectedSubmissions);
+      const unauthorized = selectedSubmissions.some(sub => {
+        return sub && sub.uid !== userId;
+      });
 
-  const handleUploadSubmit = (e) => {
-    e.preventDefault();
-    if (!submissionName.trim()) { alert("Submission name required"); return; }
-    if (!selectedFile) { alert("Please upload a JSON file"); return; }
-    alert("Upload request sent to backend (mock)");
-    setShowUploadModal(false);
-    setSubmissionName("");
-    setSelectedFile(null);
+      if (unauthorized) {
+          setShowError(true);
+          return;
+      }
+
+      const newName = mergedName.trim();
+      if (!newName) return;
+      setModalLoading(true);
+      try {
+          const response = await fetch(`${backendUrl}/submissions/merge`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  sids: selected,
+                  newName: newName,
+                  userId: userId, // Replace with real Auth UID
+                  lid: languageId
+              })
+          });
+
+          if (response.ok) {
+              toast.success("Submissions merged successful!");
+              setSelectedSubmissions([]);
+              setMergedName("");
+              setModalLoading(false);
+              setShowMergeModal(false);
+              reget();          }
+      } catch (err) {
+          toast.error("Merge failed.");
+      }
   };
 
-  const handleDelete = (id) => {
-    if (!confirm("Are you sure you want to delete this submission?")) return;
-    alert("Delete request sent to backend (mock)");
+  const handleUpload = async (e) => {
+      e.preventDefault();
+      if (!selectedFile || !submissionName) {
+          toast.error("Please provide both a name and a file.");
+          return;
+      }
+      setModalLoading(true);
+      try {
+          // 1. Read the file content
+          const fileReader = new FileReader();
+          
+          fileReader.onload = async (e) => {
+              try {
+                  const fileContent = JSON.parse(e.target.result);
+                  console.log("Parsed file content:", fileContent);
+
+                  // 2. Send to Backend
+                  const response = await fetch(`${backendUrl}/submissions/addSubmission`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                          newName: submissionName,
+                          userId: userId,
+                          lid: languageId,
+                          fileContent: fileContent
+                      })
+                  });
+
+                  const result = await response.json();
+
+                  if (result.success) {
+                      toast.success("Upload successful!");
+                      setSelectedFile(null);
+                      setSubmissionName("");
+                      setModalLoading(false);
+                      setShowUploadModal(false);
+                      reget();
+                  } else {
+                      throw new Error(result.message);
+                  }
+              } catch (err) {
+                  toast.error("ERROR: " + err.message);
+              }
+          };
+
+          fileReader.readAsText(selectedFile);
+
+      } catch (error) {
+          console.error("Upload Error:", error);
+          toast.error("error reading file");
+      }
   };
 
   const selectedCount = selected.length;
-  const myCount = submissions.filter(s => s.owner === "me").length;
+  const myCount = submissions.filter(s => s.uid === userId).length;
+
+  if (loading) return (<div style={s.page}>
+                        <style>{`        
+                        .loader-overlay {
+                          position: fixed;
+                          top: 0;
+                          left: 0;
+                          width: 100vw;
+                          height: 100vh;
+                          display: flex;
+                          justify-content: center;
+                          align-items: center;
+                          z-index: 9999; /* Ensures it stays on top */
+                        }
+
+                        /* The themed spinner */
+                        .main-spinner {
+                          width: 80px;
+                          height: 80px;
+                          border: 5px solid #28568b;
+                          border-radius: 50%;
+                          border-top-color: #deeaea;
+                          animation: spin 1s linear infinite;
+                        }
+
+                        @keyframes spin { 
+                          to { transform: rotate(360deg); } 
+                        `}
+                        </style>
+                        <div className="loader-overlay">
+                          <div className="main-spinner"></div>
+                        </div>
+                      </div>);
 
   return (
     <div style={s.page}>
@@ -101,6 +300,7 @@ export default function SubmissionsPage() {
         .action-btn:hover { background: #0f3460 !important; transform: translateY(-1px); }
         .upload-btn:hover { background: rgba(226,185,111,0.12) !important; transform: translateY(-1px); }
         .delete-btn:hover { background: rgba(239,68,68,0.15) !important; color: #ef4444 !important; }
+        .delete-btn2:hover { background: #af1d1d !important; }
         .close-btn:hover { background: #f0f0f0 !important; }
         .save-btn:hover { background: #0f3460 !important; }
         .cancel-btn:hover { background: #e2e8f0 !important; }
@@ -110,6 +310,16 @@ export default function SubmissionsPage() {
         .dropdown-item:hover { background: #f7f8fc !important; }
         .modal-overlay { animation: fadeIn 0.2s ease; }
         .modal-box { animation: slideUp 0.25s ease; }
+        .spinner {
+          width: 20px;
+          height: 20px;
+          border: 3px solid rgba(255,255,255,0.3);
+          border-radius: 50%;
+          border-top-color: #fff;
+          animation: spin 0.8s linear infinite;
+          margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
         input[type="file"]::file-selector-button {
           padding: 6px 12px; border-radius: 8px; border: none;
           background: #1a1a2e; color: #e2b96f; cursor: pointer;
@@ -126,8 +336,8 @@ export default function SubmissionsPage() {
       
               <div style={s.userArea} ref={dropdownRef}>
                 <button style={s.userPill} onClick={() => setDropdownOpen(o => !o)}>
-                  <div style={s.avatar}>{mockUser.initials}</div>
-                  <span style={s.userName}>{mockUser.name}</span>
+                  <div style={s.avatar}>{user?.initials}</div>
+                  <span style={s.userName}>{user?.username}</span>
                   <span style={{ color: '#a0aec0', fontSize: '11px', marginLeft: '4px' }}>
                     {dropdownOpen ? '▲' : '▼'}
                   </span>
@@ -136,16 +346,16 @@ export default function SubmissionsPage() {
                 {dropdownOpen && (
                   <div style={s.dropdown}>
                     <div style={s.dropdownHeader}>
-                      <div style={{ ...s.avatar, width: '36px', height: '36px', fontSize: '13px' }}>{mockUser.initials}</div>
+                      <div style={{ ...s.avatar, width: '36px', height: '36px', fontSize: '13px' }}>{user?.initials}</div>
                       <div>
-                        <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a2e' }}>{mockUser.name}</div>
-                        <div style={{ fontSize: '11px', color: '#a0aec0' }}>alex@example.com</div>
+                        <div style={{ fontSize: '13px', fontWeight: 500, color: '#1a1a2e' }}>{user?.username}</div>
+                        <div style={{ fontSize: '11px', color: '#b4b4b4' }}>{userEmail}</div>
                       </div>
                     </div>
                     <div style={s.dropdownDivider} />
                       <button onClick={() => router.push("/models")} className="dropdown-item" style={s.dropdownItem}>Models</button>
                     <div style={s.dropdownDivider} />
-                      <button onClick={() => router.push("/")} className="dropdown-item" style={s.dropdownItem}>Datasets</button>
+                      <button onClick={() => router.push("/")} className="dropdown-item" style={s.dropdownItem}>Home</button>
                     <div style={s.dropdownDivider} />
                       <button onClick={() => router.push("/login")} className="logout-item" style={{ ...s.dropdownItem, color: '#e74c3c' }}>
                       Sign out →
@@ -186,7 +396,7 @@ export default function SubmissionsPage() {
             <button
               className="action-btn"
               style={{ ...s.actionBtn, opacity: selectedCount === 0 ? 0.4 : 1 }}
-              onClick={handleDownload}
+              onClick={() => handleDownload(selected)}
               disabled={selectedCount === 0}
             >
               ↓ Download Selected
@@ -194,7 +404,7 @@ export default function SubmissionsPage() {
             <button
               className="action-btn"
               style={{ ...s.actionBtn, opacity: selectedCount < 2 ? 0.4 : 1 }}
-              onClick={handleMerge}
+              onClick={() => setShowMergeModal(true)}
               disabled={selectedCount < 2}
             >
               ⊕ Merge Selected
@@ -218,20 +428,20 @@ export default function SubmissionsPage() {
         ) : (
           <div style={s.list}>
           {submissions.map((submission) => {
-            const isSelected = selected.includes(submission.id);
+            const isSelected = selected.includes(submission.sid);
             return (
               <div
-                key={submission.id}
+                key={submission.sid}
                 className="sub-item"
                 style={{ 
                   ...s.item, 
                   ...(isSelected ? s.itemSelected : {}), 
-                  ...(hoveredId === submission.id && !isSelected ? s.itemHover : {}),
+                  ...(hoveredId === submission.sid && !isSelected ? s.itemHover : {}),
                   cursor: 'pointer' // Shows the whole box is interactive
                 }}
                 // 1. Clicking the box now toggles selection
-                onClick={(e) => toggleSelection(e, submission.id)} 
-                onMouseEnter={() => setHoveredId(submission.id)}
+                onClick={(e) => toggleSelection(e, submission.sid,submission)} 
+                onMouseEnter={() => setHoveredId(submission.sid)}
                 onMouseLeave={() => setHoveredId(null)}
               >
                 {isSelected && <div style={s.itemAccent} />}
@@ -250,7 +460,7 @@ export default function SubmissionsPage() {
                     transition: 'background 0.2s'
                   }}
                 >
-                  <span style={s.itemName}>{submission.name}</span>
+                  <span style={s.itemName}>{submission.submission_name}</span>
                   {/* 3. Visual cue for the signs part */}
                   <span style={{ 
                     ...s.itemMeta, 
@@ -268,12 +478,12 @@ export default function SubmissionsPage() {
                     handleOpenView(submission);
                   }}
                   >
-                    {submission.language} • {submission.signs.length} signs
+                    {submission.language_name} • {submission.signs.length} signs
                   </span>
                 </div>
 
-                <div style={{ ...s.ownerBadge, ...(submission.owner === "me" ? s.ownerBadgeMe : s.ownerBadgeOther) }}>
-                  {submission.owner === "me" ? 'Owned' : 'Shared'}
+                <div style={{ ...s.ownerBadge, ...(submission.uid === userId ? s.ownerBadgeMe : s.ownerBadgeOther) }}>
+                  {submission.uid === userId ? 'Owned' : 'Shared'}
                 </div>
 
                 <button 
@@ -281,7 +491,8 @@ export default function SubmissionsPage() {
                   style={s.deleteBtn} 
                   onClick={(e) => { 
                     e.stopPropagation(); // Prevents toggleSelection
-                    handleDelete(submission.id); 
+                    setShowDeleteModal(true);
+                    setSubmissionDeleting(submission); 
                   }}
                 >
                   Delete
@@ -305,24 +516,57 @@ export default function SubmissionsPage() {
             </div>
             <h2 style={s.modalTitle}>Permission Error</h2>
             <p style={s.modalBody}>
-              You are not the owner of one or more selected submissions. You can only merge submissions that belong to you.
+              You are not the owner of one or more selected submissions. You can only merge/delete submissions that belong to you.
             </p>
             <button
               style={{ ...s.saveBtn, background: '#dc2626', marginTop: 8 }}
               onClick={() => setShowError(false)}
             >
-              Understood
+              OK
             </button>
           </div>
         </div>
       )}
+
+      {/* Confirm Delete MODAL */}
+      {showDeleteModal && (
+        <div className="modal-overlay" style={s.overlay} onClick={() => setShowDeleteModal(false)}>
+          <div className="modal-box" style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div style={s.modalIconWrap}>
+                <span style={{ fontSize: 22 }}>⚠️</span>
+              </div>
+              <button className="close-btn" style={s.closeBtn} onClick={() => setShowDeleteModal(false)}>✕</button>
+            </div>
+            <h2 style={s.modalTitle}>Deleting</h2>
+            <p style={s.modalBody}>
+              Are you sure you want to delete this submission? This action cannot be undone.
+            </p>
+            <button
+              className="delete-btn2"
+              style={{ ...s.deleteBtn2, marginTop: 8 , marginRight: 20}}
+              onClick={() => {setShowDeleteModal(false); handleDelete(submissionDeleting?.sid, submissionDeleting?.uid, submissionDeleting?.readings_file);}}
+            >
+              Delete
+            </button>
+            <button
+              className="cancel-btn"
+              style={{ ...s.cancelBtn, marginTop: 8 }}
+              onClick={() => setShowDeleteModal(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Submission MODAL */}
       {showViewModal && activeSubmission && (
         <div className="modal-overlay" style={s.overlay} onClick={() => setShowViewModal(false)}>
           <div className="modal-box" style={{ ...s.modal, maxWidth: '500px' }} onClick={e => e.stopPropagation()}>
             <div style={s.modalHeader}>
               <div>
-                <h2 style={s.modalTitle}>{activeSubmission.name}</h2>
+                <h2 style={s.modalTitle}>{activeSubmission.submission_name}</h2>
                 <p style={s.modalSub}>Signs included in this session</p>
               </div>
               <button className="close-btn" style={s.closeBtn} onClick={() => setShowViewModal(false)}>✕</button>
@@ -351,7 +595,7 @@ export default function SubmissionsPage() {
               <button className="close-btn" style={s.closeBtn} onClick={() => setShowUploadModal(false)}>✕</button>
             </div>
 
-            <form onSubmit={handleUploadSubmit} style={s.form}>
+            <form onSubmit={handleUpload} style={s.form}>
               <div style={s.fieldGroup}>
                 <label style={s.label}>Submission name</label>
                 <input
@@ -381,12 +625,55 @@ export default function SubmissionsPage() {
               </div>
 
               <div style={s.modalActions}>
-                <button type="submit" className="save-btn" style={s.saveBtn}>Save Submission</button>
+                <button type="submit" className="save-btn" style={s.saveBtn}>{modalLoading ? <div className="spinner" /> : "Save Submission"}</button>
                 <button
                   type="button"
                   className="cancel-btn"
+                  disabled={modalLoading}
                   style={s.cancelBtn}
                   onClick={() => setShowUploadModal(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Merge MODAL */}
+      {showMergeModal && (
+        <div className="modal-overlay" style={s.overlay} onClick={() => setShowMergeModal(false)}>
+          <div className="modal-box" style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div>
+                <h2 style={s.modalTitle}>Merge Submissions</h2>
+                <p style={s.modalSub}>Combine multiple submissions</p>
+              </div>
+              <button className="close-btn" style={s.closeBtn} onClick={() => setShowMergeModal(false)}>✕</button>
+            </div>
+
+            <form onSubmit={(e) => handleMerge(e)} style={s.form}>
+              <div style={s.fieldGroup}>
+                <label style={s.label}>Merged Submission name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Session 4"
+                  value={mergedName}
+                  onChange={e => setMergedName(e.target.value)}
+                  style={s.input}
+                  onFocus={e => Object.assign(e.target.style, s.inputFocus)}
+                  onBlur={e => Object.assign(e.target.style, { borderColor: '#e2e8f0', boxShadow: 'none' })}
+                />
+              </div>
+
+              <div style={s.modalActions}>
+                <button type="submit" className="save-btn" style={s.saveBtn}>{modalLoading ? <div className="spinner" /> : "Merge Submission"}</button>
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  disabled={modalLoading}
+                  style={s.cancelBtn}
+                  onClick={() => setShowMergeModal(false)}
                 >
                   Cancel
                 </button>
@@ -684,6 +971,13 @@ const s = {
     transition: 'background 0.2s',
     fontFamily: "'DM Sans', sans-serif",
   },
+  deleteBtn2: {
+    padding: '13px', background: '#dc2626', color: '#ffffff',
+    border: 'none', borderRadius: '12px',
+    fontSize: '14.5px', fontWeight: 500, cursor: 'pointer',
+    transition: 'background 0.2s',
+    fontFamily: "'DM Sans', sans-serif",
+  },
   cancelBtn: {
     padding: '12px', background: '#f1f5f9', color: '#4a5568',
     border: 'none', borderRadius: '12px',
@@ -691,11 +985,6 @@ const s = {
     transition: 'background 0.2s',
     fontFamily: "'DM Sans', sans-serif",
   },
-  overlay: { position: 'fixed', inset: 0, background: 'rgba(10,15,30,0.45)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 },
-  modal: { background: '#ffffff', borderRadius: '24px', width: '90%', padding: '32px', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' },
-  modalTitle: { fontFamily: "'Playfair Display', serif", fontSize: '22px', color: '#1a1a2e' },
-  modalSub: { fontSize: '13px', color: '#a0aec0' },
   closeBtn: { width: 34, height: 34, borderRadius: '50%', border: 'none', background: '#f7f8fc', cursor: 'pointer' },
   saveBtn: { padding: '13px', background: '#1a1a2e', color: '#ffffff', border: 'none', borderRadius: '12px', cursor: 'pointer' },
   signsContainer: { display: 'flex', flexWrap: 'wrap', gap: '8px', maxHeight: '300px', overflowY: 'auto', padding: '4px' },

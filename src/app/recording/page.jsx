@@ -4,9 +4,8 @@ import { Canvas } from '@react-three/fiber';
 import { HandModel } from "../components/HandModel";
 import Image from "next/image";
 import logo from "../assets/logo.png";
+import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
-
-const mockUser = { name: "Ahmed Ashry", initials: "AA" };
 
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
 function Scene({ sensorData, calibrate }) {
@@ -61,6 +60,9 @@ function RecordingModal({
 
   return (
     <div style={rm.overlay}>
+      <style>
+        {`.close-btn:hover { background: #2e2e51 !important; }`}
+      </style>
       <div style={rm.modal}>
         {/* Header */}
         <div style={rm.header}>
@@ -76,6 +78,13 @@ function RecordingModal({
           </div>
           <div style={rm.headerRight}>
             <span style={rm.durationLabel}>{duration}s</span>
+            <button
+              className="close-btn"
+              style={s.closeBtn}
+              onClick={onDiscard}
+            >
+              ✕
+            </button>
           </div>
         </div>
 
@@ -156,6 +165,11 @@ export default function GloveCapture() {
   const socketRef    = useRef(null);
   const [currentFrame, setCurrentFrame] = useState(null);
 
+  const [user, setUser] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
+  const [loading, setLoading] =useState(false);
+  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
   // Calibration ref – set to true to trigger reset inside HandModel
   const calibrateRef = useRef(false);
 
@@ -184,8 +198,9 @@ export default function GloveCapture() {
 
   // ── WebSocket ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    const GLOVE_IP = "192.168.0.71";
-    socketRef.current = new WebSocket(`ws://${GLOVE_IP}:81`);
+    // We connect to the bridge. 
+    // The moment this connection opens, the bridge pings the ESP32 for us.
+    socketRef.current = new WebSocket("ws://localhost:8080");
 
     socketRef.current.onmessage = (event) => {
       try {
@@ -197,12 +212,12 @@ export default function GloveCapture() {
           }
         }
       } catch (err) {
-        console.error("WS parse error:", err);
+        console.error("Data parse error:", err);
       }
     };
 
     return () => socketRef.current?.close();
-  }, []); // single mount – isRecordingRef handles the flag
+  }, []);
 
   // Keep ref in sync with state
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
@@ -216,6 +231,26 @@ export default function GloveCapture() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  useEffect(() => {
+      async function init() {
+        setLoading(true);
+
+        // Get user
+        const { data: { user } } = await supabase.auth.getUser();
+        setUserEmail(user.email);
+        setUserId(user.id);
+        console.log("Authenticated user:", user);
+        const userRes = await fetch(`${backendUrl}/profile/info?userId=${user.id}`);
+        const userData = await userRes.json();
+        setUser(userData[0]);
+        console.log("Profile info:", userData);
+
+        setLoading(false);
+      }
+
+      init();
+    }, []);
 
   // ── Recording flow ─────────────────────────────────────────────────────────
   const handleStartRecording = () => {
@@ -269,6 +304,39 @@ export default function GloveCapture() {
   const handleRemoveSign = (idx) => {
     setSigns(prev => prev.filter((_, i) => i !== idx));
   };
+if (loading) return (<div style={s.page}>
+                        <style>{`        
+                          .loader-overlay {
+                            position: fixed;
+                            top: 0;
+                            left: 0;
+                            width: 100vw;
+                            height: 100vh;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            background: linear-gradient(135deg, #1a1a2e, #0f3460); /* Color1 */
+                            z-index: 9999; /* Ensures it stays on top */
+                          }
+
+                          .main-spinner {
+                            width: 50px;
+                            height: 50px;
+                            border: 5px solid rgba(226, 185, 111, 0.2); /* Faded Color2 */
+                            border-radius: 50%;
+                            border-top-color: #e2b96f; /* Solid Color2 */
+                            animation: spin 1s linear infinite;
+                          }
+
+                          @keyframes spin { 
+                            to { transform: rotate(360deg); } 
+                          }
+                        `}
+                        </style>
+                        <div className="loader-overlay">
+                          <div className="main-spinner"></div>
+                        </div>
+                      </div>);
 
   return (
     <div style={s.page}>
@@ -307,17 +375,17 @@ export default function GloveCapture() {
         </div>
         <div style={s.navRight} ref={dropdownRef}>
           <button style={s.userPill} onClick={() => setDropdownOpen(o => !o)}>
-            <div style={s.avatar}>{mockUser.initials}</div>
-            <span style={s.userName}>{mockUser.name}</span>
+            <div style={s.avatar}>{user?.initials}</div>
+            <span style={s.userName}>{user?.username}</span>
             <span style={s.chevron}>{dropdownOpen ? '▲' : '▼'}</span>
           </button>
           {dropdownOpen && (
             <div style={s.dropdown}>
               <div style={s.ddHeader}>
-                <div style={{ ...s.avatar, width: 36, height: 36, fontSize: 13 }}>{mockUser.initials}</div>
+                <div style={{ ...s.avatar, width: 36, height: 36, fontSize: 13 }}>{user?.initials}</div>
                 <div>
-                  <div style={s.ddName}>{mockUser.name}</div>
-                  <div style={s.ddEmail}>ahmed@example.com</div>
+                  <div style={s.ddName}>{user?.username}</div>
+                  <div style={s.ddEmail}>{userEmail}</div>
                 </div>
               </div>
               <div style={s.ddDivider} />
@@ -456,7 +524,7 @@ export default function GloveCapture() {
               onClick={handleUpload}
               disabled={signs.length === 0}
             >
-              {uploadStatus === 'success' ? '✓ Uploaded!' : `Upload ${signs.length} Sign${signs.length !== 1 ? 's' : ''} →`}
+              {uploadStatus === 'success' ? '✓ Saved!' : `Save ${signs.length} Sign${signs.length !== 1 ? 's' : ''} →`}
             </button>
 
             {uploadStatus === 'success' && (
@@ -580,7 +648,13 @@ const s = {
   uploadBtn: { width:'100%', padding:13, background:'#1a1a2e', color:'#e2b96f', border:'1px solid rgba(226,185,111,0.25)', borderRadius:12, fontSize:14, fontWeight:500, cursor:'pointer', transition:'background 0.2s, transform 0.15s', fontFamily:"'DM Sans', sans-serif", letterSpacing:'0.3px' },
   successBanner: { marginTop:12, padding:'10px 14px', background:'rgba(5,150,105,0.12)', border:'1px solid rgba(5,150,105,0.25)', borderRadius:10, fontSize:12.5, color:'#34d399' },
   disabledNote: { marginTop:10, fontSize:11.5, color:'#4a5568' },
-
+  closeBtn: {
+    width: 34, height: 34, borderRadius: '50%',
+    border: 'none', background: 'transparent',
+    cursor: 'pointer', fontSize: '13px', color: '#7a8499',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    transition: 'background 0.2s', flexShrink: 0,
+  },
   sensorGrid: { display:'flex', flexDirection:'column', gap:6 },
   sensorRow: { display:'flex', alignItems:'center', gap:10 },
   sensorKey: { fontSize:11.5, color:'#718096', width:50 },
@@ -592,18 +666,18 @@ const s = {
 // ─── Modal styles ─────────────────────────────────────────────────────────────
 const rm = {
   overlay: { position:'fixed', inset:0, background:'rgba(5,7,18,0.85)', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50, animation:'fadeIn 0.2s ease', padding:24 },
-  modal: { background:'#0d1020', border:'1px solid rgba(255,255,255,0.08)', borderRadius:24, width:'100%', maxWidth:900, maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 32px 80px rgba(0,0,0,0.7)', animation:'slideUp 0.3s ease' },
+  modal: { background:'#0d1020', border:'1px solid rgba(255,255,255,0.08)', borderRadius:24, width:'100%', maxWidth:900, display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 32px 80px rgba(0,0,0,0.7)', animation:'slideUp 0.3s ease' },
 
   header: { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'18px 24px', background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.06)', flexShrink:0 },
   headerLeft: { display:'flex', alignItems:'center', gap:14 },
-  headerRight: {},
+  headerRight: {display: 'flex'},
   signChip: { display:'flex', alignItems:'center', gap:8, padding:'6px 14px', background:'rgba(226,185,111,0.10)', border:'1px solid rgba(226,185,111,0.25)', borderRadius:100 },
   signChipIcon: { fontSize:16 },
   signChipText: { fontSize:14, fontWeight:600, color:'#e2b96f' },
   recBadge: { display:'flex', alignItems:'center', gap:8, padding:'5px 12px', borderRadius:100, background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.25)', color:'#ef4444', fontSize:12, fontWeight:500 },
   recDot: { width:8, height:8, borderRadius:'50%', background:'#ef4444', display:'inline-block' },
   playBadge: { fontSize:12, color:'#34d399', padding:'5px 12px', background:'rgba(52,211,153,0.08)', border:'1px solid rgba(52,211,153,0.20)', borderRadius:100 },
-  durationLabel: { fontSize:13, color:'#718096' },
+  durationLabel: { fontSize:13, color:'#718096',display: 'flex', alignItems: 'center', marginRight: '10px' },
 
   viewport: { flex:1, minHeight:380, position:'relative', background:'linear-gradient(145deg, #080a14, #0f1420)', overflow:'hidden' },
   vpLabel: { position:'absolute', top:12, left:16, zIndex:2, fontSize:10, color:'#4a5568', letterSpacing:'1.5px', textTransform:'uppercase' },
