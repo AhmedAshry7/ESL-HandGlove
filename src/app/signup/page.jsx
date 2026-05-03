@@ -15,78 +15,41 @@ export default function SignupPage() {
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
   const [isLoading , setIsLoading]=useState(false);
+
   const handleSignup = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError("");
+
     const names = userName.trim().split(/\s+/);
     const initials = names.length > 1 
       ? (names[0][0] + names[names.length - 1][0]).toUpperCase()
-      : names[0][0].toUpperCase();setIsLoading(true);
-    console.log("Signup attempted with:", { userName, email, password, initials });
-    try{
+      : names[0][0].toUpperCase();
+
+    try {
       const { data, error } = await supabase.auth.signUp({
         email,
-        password
+        password,
+        options: {
+          // This 'data' object maps to 'raw_user_meta_data' in the database
+          data: {
+            username: userName,
+            initials: initials,
+          },
+        },
       });
 
-      if (!error && data.user) {
-        await supabase.from("profiles").insert({
-          id: data.user.id,
-          username: userName,
-          initials: initials
-        });
-      }
-      if (error){
-          setError(error.message);
-          setPassword("");
-          setEmail("");
-          setUserName("");
-          setIsLoading(false);
-      }else{
-        router.push("/");
-      }
+      if (error) throw error;
+
+      // If successful, you don't need to manually insert into profiles anymore!
+      // The trigger handled it.
+      router.push("/");
+      
     } catch (err) {
-        setError("Connection error. Please try again.");
-        setIsLoading(false);
-      }
-
+      setError(err.message);
+      setIsLoading(false);
+    }
   };
-
-
-  /*  const handleSignup = async (e) => {
-      e.preventDefault();
-      console.log("Signup attempted with:", { userName, email, password });
-    e.preventDefault();
-      setError("");
-      setIsLoading(true);
-
-      try {
-        const res = await fetch("http://localhost:5000/auth/signup", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ userName, email, password }),
-        });
-
-        if (!res.ok) {
-          setError("Invalid Email or password");
-          setPassword("");
-          setUsername("");
-          setIsLoading(false);
-          return;
-        }
-
-        const data = await res.json();
-
-        localStorage.setItem("token", data.token);
-
-        router.push("/");
-      } catch (err) {
-        setError("Connection error. Please try again.");
-        setIsLoading(false);
-      } 
-    };*/
-
 
   return (
     <div style={styles.page}>
