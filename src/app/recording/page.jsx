@@ -8,13 +8,13 @@ import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
-function Scene({ sensorData, calibrate }) {
+function Scene({ sensorData }) {
   return (
-    <Canvas camera={{ position: [0, 0, 5] }} style={{ width: '100%', height: '100%' }}>
+    <Canvas camera={{ position: [-7, 0, 5] }} style={{ width: '100%', height: '100%' }}>
       <ambientLight intensity={0.6} />
       <pointLight position={[10, 10, 10]} intensity={1.2} />
       <pointLight position={[-10, -5, -10]} intensity={0.4} color="#e2b96f" />
-      <HandModel sensorData={sensorData} calibrate={calibrate} />
+      <HandModel sensorData={sensorData} />
     </Canvas>
   );
 }
@@ -93,7 +93,7 @@ function RecordingModal({
           <div style={rm.vpLabel}>
             {isRecording ? 'LIVE CAPTURE' : 'PLAYBACK PREVIEW'}
           </div>
-          <Scene sensorData={displayFrame} calibrate={calibrate} />
+          <Scene sensorData={displayFrame} />
           {!displayFrame && (
             <div style={rm.vpOverlay}>
               <div style={{ fontSize: 40, opacity: 0.3, marginBottom: 12 }}>🧤</div>
@@ -186,7 +186,7 @@ export default function GloveCapture() {
 
   // Saved signs (one submission = many signs)
   const [signs, setSigns]             = useState([]); // [{label, frames, trimStart, trimEnd}]
-  const [uploadStatus, setUploadStatus] = useState(null);
+  const [downloadStatus, setDownloadStatus] = useState(null);
 
   // Nav dropdown
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -200,15 +200,19 @@ export default function GloveCapture() {
   useEffect(() => {
     // We connect to the bridge. 
     // The moment this connection opens, the bridge pings the ESP32 for us.
-    socketRef.current = new WebSocket("ws://localhost:8080");
-
+    const ESP_IP = "192.168.1.49";
+    const WS_PORT = "82"; // Ensure this matches your WS_PORT in C++
+    socketRef.current = new WebSocket(`ws://${ESP_IP}:${WS_PORT}`);
+    
     socketRef.current.onmessage = (event) => {
       try {
         const raw = JSON.parse(event.data);
-        if (raw.fingers) {
-          setCurrentFrame(raw.fingers);
+        console.log("Received WS data:", raw);
+        if (raw.flex || raw.pads) {
+          const frame = { flex: raw.flex ?? {}, pads: raw.pads ?? [] };
+          setCurrentFrame(frame);
           if (isRecordingRef.current) {
-            setRecordedFrames(prev => [...prev, raw.fingers]);
+            setRecordedFrames(prev => [...prev, frame]);
           }
         }
       } catch (err) {
@@ -291,15 +295,44 @@ export default function GloveCapture() {
     setRecordedFrames([]);
     setSignInput('');
   };
+const handleDownload = () => {
+  if (signs.length === 0) return;
 
-  const handleUpload = () => {
-    if (signs.length === 0) return;
-    console.log("Uploading submission:", signs);
-    // await fetch('/api/submissions', { method: 'POST', body: JSON.stringify({ signs }) })
-    setUploadStatus('success');
-    setTimeout(() => setUploadStatus(null), 3000);
+  try {
+    // 1. Convert the signs object/array to a JSON string
+    // The arguments (null, 2) add pretty-printing (indentation)
+    const jsonString = JSON.stringify(signs, null, 2);
+
+    // 2. Create a Blob with the JSON data
+    const blob = new Blob([jsonString], { type: 'application/json' });
+
+    // 3. Create an object URL for the Blob
+    const url = URL.createObjectURL(blob);
+
+    // 4. Create a temporary anchor element
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'signs-data.json'; // The filename for the user
+
+    // 5. Append to body, click it, and remove it
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    // 6. Clean up the URL object to free up memory
+    URL.revokeObjectURL(url);
+
+    // Update your existing UI states
+    console.log("download submission:", signs);
+    setDownloadStatus('success');
+    setTimeout(() => setDownloadStatus(null), 3000);
     setSigns([]);
-  };
+
+  } catch (error) {
+    console.error("Download failed:", error);
+    setDownloadStatus('error');
+  }
+};
 
   const handleRemoveSign = (idx) => {
     setSigns(prev => prev.filter((_, i) => i !== idx));
@@ -413,7 +446,7 @@ if (loading) return (<div style={s.page}>
           {/* Live 3-D preview */}
           <div style={s.viewport}>
             <div style={s.viewportLabel}>LIVE PREVIEW</div>
-            <Scene sensorData={currentFrame} calibrate={calibrateRef} />
+            <Scene sensorData={currentFrame} />
             {!currentFrame && (
               <div style={s.viewportOverlay}>
                 <div style={s.viewportIcon}>🧤</div>
@@ -511,29 +544,29 @@ if (loading) return (<div style={s.page}>
             )}
           </div>
 
-          {/* Upload submission */}
+          {/* Download submission */}
           <div style={s.panel}>
             <div style={s.panelHeader}>
-              <h3 style={s.panelTitle}>Upload Submission</h3>
-              <p style={s.panelSub}>Send all recorded signs to the database</p>
+              <h3 style={s.panelTitle}>Download Submission</h3>
+              <p style={s.panelSub}>Download all recorded signs as a JSON file</p>
             </div>
 
             <button
               className="upload-btn"
               style={{ ...s.uploadBtn, opacity: signs.length > 0 ? 1 : 0.4 }}
-              onClick={handleUpload}
+              onClick={handleDownload}
               disabled={signs.length === 0}
             >
-              {uploadStatus === 'success' ? '✓ Saved!' : `Save ${signs.length} Sign${signs.length !== 1 ? 's' : ''} →`}
+              {downloadStatus === 'success' ? '✓ Downloaded!' : `Download ${signs.length} Sign${signs.length !== 1 ? 's' : ''} →`}
             </button>
 
-            {uploadStatus === 'success' && (
+            {downloadStatus === 'success' && (
               <div style={s.successBanner}>
-                Submission saved successfully to the database.
+                Submission downloaded successfully.
               </div>
             )}
             {signs.length === 0 && (
-              <p style={s.disabledNote}>Add at least one sign before uploading.</p>
+              <p style={s.disabledNote}>Add at least one sign before downloading.</p>
             )}
           </div>
 
