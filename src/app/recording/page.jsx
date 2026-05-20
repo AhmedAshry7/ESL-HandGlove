@@ -42,7 +42,7 @@ const PAD_META = [
 ];
 
 function SensorReadingsPanel({ frame }) {
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = useState(true);
   const flex = frame?.flex ?? {};
   const pads = frame?.pads ?? [];
   // Build a lookup map from pad name → pad object
