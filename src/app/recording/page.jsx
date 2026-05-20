@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { HandModel } from "../components/HandModel";
 import Image from "next/image";
@@ -10,8 +10,8 @@ import { useRouter } from "next/navigation";
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
 function Scene({ sensorData }) {
   return (
-    <Canvas camera={{ position: [-7, 0, 5] }} style={{ width: '100%', height: '100%' }}>
-      <ambientLight intensity={0.6} />
+    <Canvas camera={{ position: [-7, 0, 5], fov: 35 }} style={{ width: '100%', height: '100%' }}>
+      <ambientLight intensity={4} />
       <pointLight position={[10, 10, 10]} intensity={1.2} />
       <pointLight position={[-10, -5, -10]} intensity={0.4} color="#e2b96f" />
       <HandModel sensorData={sensorData} />
@@ -199,8 +199,8 @@ export default function GloveCapture() {
   // ── WebSocket ──────────────────────────────────────────────────────────────
   useEffect(() => {
     // We connect to the bridge. 
-    // The moment this connection opens, the bridge pings the ESP32 for us.
-    const ESP_IP = "192.168.1.49";
+    // The moment this connection opens, the bridge pings the ESP32 for us.ws://
+    const ESP_IP = "172.20.104.242";
     const WS_PORT = "82"; // Ensure this matches your WS_PORT in C++
     socketRef.current = new WebSocket(`ws://${ESP_IP}:${WS_PORT}`);
     
@@ -644,7 +644,7 @@ const s = {
   title: { fontFamily:"'Playfair Display', serif", fontSize:26, fontWeight:600, color:'#ffffff', marginBottom:4 },
   subtitle: { fontSize:13, color:'#718096', fontWeight:300 },
 
-  viewport: { flex:1, minHeight:400, background:'linear-gradient(145deg, #0a0c18, #111827)', borderRadius:20, border:'1px solid rgba(255,255,255,0.06)', position:'relative', overflow:'hidden', boxShadow:'inset 0 0 60px rgba(0,0,0,0.4)' },
+  viewport: { flex:1, minHeight:400, background:'linear-gradient(145deg, #0a0c18, #111827)', borderRadius:20, border:'1px solid rgba(255,255,255,0.06)', boxShadow:'inset 0 0 60px rgba(0,0,0,0.4)' },
   viewportLabel: { position:'absolute', top:14, left:18, zIndex:2, fontSize:11, fontWeight:500, color:'#4a5568', letterSpacing:'1px', textTransform:'uppercase' },
   viewportOverlay: { position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', pointerEvents:'none' },
   viewportIcon: { fontSize:40, marginBottom:12, opacity:0.3 },
@@ -712,7 +712,7 @@ const rm = {
   playBadge: { fontSize:12, color:'#34d399', padding:'5px 12px', background:'rgba(52,211,153,0.08)', border:'1px solid rgba(52,211,153,0.20)', borderRadius:100 },
   durationLabel: { fontSize:13, color:'#718096',display: 'flex', alignItems: 'center', marginRight: '10px' },
 
-  viewport: { flex:1, minHeight:380, position:'relative', background:'linear-gradient(145deg, #080a14, #0f1420)', overflow:'hidden' },
+  viewport: { position: 'relative', width: '100%',height: '380px', background: 'linear-gradient(145deg, #0a0c18, #111827)', borderRadius: 20, border: '1px solid rgba(255,255,255,0.06)', boxShadow: 'inset 0 0 60px rgba(0,0,0,0.4)', overflow: 'hidden', display: 'flex', flexDirection: 'column'},
   vpLabel: { position:'absolute', top:12, left:16, zIndex:2, fontSize:10, color:'#4a5568', letterSpacing:'1.5px', textTransform:'uppercase' },
   vpOverlay: { position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', pointerEvents:'none' },
 
@@ -729,7 +729,7 @@ const rm = {
   sliderRow: { display:'flex', justifyContent:'space-between', marginBottom:6 },
   sliderLabel: { fontSize:12, color:'#a0aec0' },
   sliderVal: { fontSize:12, color:'#e2b96f', fontWeight:500 },
-  trimBar: { height:6, background:'#1a1f35', borderRadius:6, position:'relative', overflow:'hidden', marginTop:4 },
+  trimBar: { height:6, background:'#1a1f35', borderRadius:6, overflow:'hidden', marginTop:4 },
   trimFill: { position:'absolute', height:'100%', background:'linear-gradient(90deg, #0f3460, #e2b96f)', borderRadius:6 },
 
   actionRow: { display:'flex', gap:12, justifyContent:'flex-end' },

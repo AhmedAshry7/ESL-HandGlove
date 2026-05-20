@@ -254,7 +254,7 @@ export function HandModel({ sensorData, ...props }) {
   });
 
   return (
-    <group ref={group} {...props} dispose={null}>
+    <group ref={group} {...props} position={[0, -1.5, 0]} dispose={null}>
       <group name="Sketchfab_Scene">
         <group name="Sketchfab_model" rotation={[-Math.PI / 2, 0, 0]} scale={0.015}>
           <group name="f02ee8bcd0644bfa96313f17aa2cca59fbx" rotation={[Math.PI / 2, 0, 0]}>
