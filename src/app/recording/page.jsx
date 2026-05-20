@@ -7,6 +7,130 @@ import logo from "../assets/logo.png";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
+// ─── Sensor readings panel ───────────────────────────────────────────────────
+// All pad channel metadata mirrored from the ESP firmware padDefs array.
+const FLEX_META = [
+  { key: 'idx_mcp', label: 'Index MCP',  color: '#60a5fa' },
+  { key: 'idx_pcp', label: 'Index PIP',  color: '#93c5fd' },
+  { key: 'mid_mcp', label: 'Middle MCP', color: '#4ade80' },
+  { key: 'mid_pcp', label: 'Middle PIP', color: '#86efac' },
+  { key: 'rng_mcp', label: 'Ring MCP',   color: '#f472b6' },
+  { key: 'rng_pcp', label: 'Ring PIP',   color: '#f9a8d4' },
+  { key: 'pky_mcp', label: 'Pinky MCP',  color: '#a78bfa' },
+  { key: 'pky_pcp', label: 'Pinky PIP',  color: '#c4b5fd' },
+];
+const FRONT_ZONE_NAMES = ['Bottom (10Ω)', 'Lower-Mid (330Ω)', 'Upper-Mid (470Ω)', 'Tip (1kΩ)', 'Touch (5kΩ)'];
+const SIDE_ZONE_NAMES  = ['Side-High', 'Side-Mid', 'Two-Fingers'];
+const TOP_ZONE_NAMES   = ['Index', 'Middle', 'Ring', 'Pinky'];
+const PAD_META = [
+  { key: 'PAD_FRONT0', label: 'Front: Index',  color: '#60a5fa', zones: FRONT_ZONE_NAMES },
+  { key: 'PAD_FRONT1', label: 'Front: Middle', color: '#4ade80', zones: FRONT_ZONE_NAMES },
+  { key: 'PAD_FRONT2', label: 'Front: Ring',   color: '#f472b6', zones: FRONT_ZONE_NAMES },
+  { key: 'PAD_FRONT3', label: 'Front: Pinky',  color: '#a78bfa', zones: FRONT_ZONE_NAMES },
+  { key: 'PAD_TOP',    label: 'Top Palm',       color: '#e2b96f', zones: TOP_ZONE_NAMES  },
+  { key: 'PAD_UNUSED5',label: 'Unused 5',       color: '#4a5568', zones: []              },
+  { key: 'PAD_SIDE6',  label: 'Side: Middle',   color: '#4ade80', zones: SIDE_ZONE_NAMES },
+  { key: 'PAD_SIDE7',  label: 'Side: Ring',     color: '#f472b6', zones: SIDE_ZONE_NAMES },
+  { key: 'PAD_SIDE8',  label: 'Side: Pinky',    color: '#a78bfa', zones: SIDE_ZONE_NAMES },
+  { key: 'PAD_SIDE9',  label: 'Side: Index',    color: '#60a5fa', zones: SIDE_ZONE_NAMES },
+  { key: 'PAD_TEST10', label: 'Test 10',         color: '#4a5568', zones: []              },
+  { key: 'PAD_TEST11', label: 'Test 11',         color: '#4a5568', zones: []              },
+  { key: 'PAD_TEST12', label: 'Test 12',         color: '#4a5568', zones: []              },
+  { key: 'PAD_TEST13', label: 'Test 13',         color: '#4a5568', zones: []              },
+  { key: 'PAD_TEST14', label: 'Test 14',         color: '#4a5568', zones: []              },
+  { key: 'PAD_TEST15', label: 'Test 15',         color: '#4a5568', zones: []              },
+];
+
+function SensorReadingsPanel({ frame }) {
+  const [open, setOpen] = React.useState(true);
+  const flex = frame?.flex ?? {};
+  const pads = frame?.pads ?? [];
+  // Build a lookup map from pad name → pad object
+  const padMap = {};
+  pads.forEach(p => { padMap[p.n] = p; });
+
+  const sp = {
+    wrap: { background: 'rgba(10,12,28,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, overflow: 'hidden', backdropFilter: 'blur(12px)' },
+    header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: open ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer', userSelect: 'none' },
+    title: { fontSize: 12, fontWeight: 600, color: '#a0aec0', letterSpacing: '0.8px', textTransform: 'uppercase' },
+    toggle: { fontSize: 11, color: '#4a5568', padding: '2px 8px', background: 'rgba(255,255,255,0.04)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.07)', cursor: 'pointer' },
+    body: { maxHeight: 420, overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 14 },
+    section: { display: 'flex', flexDirection: 'column', gap: 4 },
+    sectionTitle: { fontSize: 10, fontWeight: 600, color: '#4a5568', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 4, paddingBottom: 3, borderBottom: '1px solid rgba(255,255,255,0.04)' },
+    row: { display: 'flex', alignItems: 'center', gap: 8, minHeight: 22 },
+    dot: (color) => ({ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }),
+    lbl: { fontSize: 11, color: '#718096', width: 90, flexShrink: 0 },
+    barBg: { flex: 1, height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' },
+    barFill: (color, pct) => ({ height: '100%', width: `${pct}%`, background: color, borderRadius: 3, transition: 'width 0.15s' }),
+    val: { fontSize: 10.5, color: '#e2b96f', width: 36, textAlign: 'right', flexShrink: 0 },
+    zone: (active) => ({ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: active ? 'rgba(226,185,111,0.18)' : 'rgba(255,255,255,0.03)', color: active ? '#e2b96f' : '#4a5568', border: `1px solid ${active ? 'rgba(226,185,111,0.35)' : 'rgba(255,255,255,0.05)'}`, transition: 'all 0.15s' }),
+    rawVal: { fontSize: 10, color: '#4a5568', width: 36, textAlign: 'right', flexShrink: 0 },
+  };
+
+  return (
+    <div style={sp.wrap}>
+      <div style={sp.header} onClick={() => setOpen(o => !o)}>
+        <span style={sp.title}>📡 Sensor Readings</span>
+        <span style={sp.toggle}>{open ? '▲ Hide' : '▼ Show'}</span>
+      </div>
+      {open && (
+        <div style={sp.body}>
+          {/* ── Flex sensors ── */}
+          <div style={sp.section}>
+            <div style={sp.sectionTitle}>Flex Sensors</div>
+            {FLEX_META.map(({ key, label, color }) => {
+              const curl = flex[key]?.curl ?? 0;
+              const raw  = flex[key]?.raw  ?? 0;
+              return (
+                <div key={key} style={sp.row}>
+                  <div style={sp.dot(color)} />
+                  <span style={sp.lbl}>{label}</span>
+                  <div style={sp.barBg}>
+                    <div style={sp.barFill(color, Math.round(curl * 100))} />
+                  </div>
+                  <span style={sp.val}>{(curl * 100).toFixed(0)}%</span>
+                  <span style={sp.rawVal}>{raw}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Contact pads ── */}
+          <div style={sp.section}>
+            <div style={sp.sectionTitle}>Contact Pads</div>
+            {PAD_META.map(({ key, label, color, zones }) => {
+              const pad = padMap[key];
+              const z   = pad?.z ?? -1;
+              const r   = pad?.r ?? 0;
+              const active = z !== -1;
+              return (
+                <div key={key} style={{ ...sp.row, flexWrap: 'wrap', rowGap: 3, alignItems: 'flex-start', paddingBottom: zones.length ? 4 : 0 }}>
+                  <div style={{ ...sp.row, width: '100%', flexWrap: 'nowrap' }}>
+                    <div style={sp.dot(active ? color : '#2d3748')} />
+                    <span style={{ ...sp.lbl, color: active ? '#a0aec0' : '#4a5568' }}>{label}</span>
+                    <div style={sp.barBg}>
+                      <div style={sp.barFill(color, active ? Math.min(100, (r / 4095) * 100) : 0)} />
+                    </div>
+                    <span style={sp.val}>{active ? `z${z}` : '—'}</span>
+                    <span style={sp.rawVal}>{active ? r : '—'}</span>
+                  </div>
+                  {zones.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, paddingLeft: 15, flexWrap: 'wrap' }}>
+                      {zones.map((zn, zi) => (
+                        <span key={zi} style={sp.zone(active && z === zi)}>{zn}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
 function Scene({ sensorData }) {
   return (
@@ -570,29 +694,8 @@ if (loading) return (<div style={s.page}>
             )}
           </div>
 
-          {/* Live sensor readout */}
-          {currentFrame && (
-            <div style={s.panel}>
-              <div style={s.panelHeader}>
-                <h3 style={s.panelTitle}>Live Sensor Data</h3>
-              </div>
-              <div style={s.sensorGrid}>
-                {Object.entries(currentFrame).map(([key, fingerObj]) => (
-                  <div key={key} style={{ ...s.sensorRow, flexDirection: 'column', alignItems: 'flex-start', gap: 2, marginBottom: 8 }}>
-                    <span style={{ ...s.sensorKey, fontWeight: 600, color: '#e2b96f', textTransform: 'capitalize' }}>{key}</span>
-                    <div style={s.sensorRow}>
-                      <div style={s.sensorBarBg}>
-                        <div style={{ ...s.sensorBarFill, width: `${Math.min(100, Math.abs(fingerObj.pitch || fingerObj.qw || 0))}%` }} />
-                      </div>
-                      <span style={s.sensorVal}>
-                        {fingerObj.pitch !== undefined ? fingerObj.pitch.toFixed(1) : fingerObj.qw?.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Live sensor readings panel */}
+          <SensorReadingsPanel frame={currentFrame} />
         </div>
       </div>
 
