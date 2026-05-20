@@ -54,18 +54,23 @@ const CURL_Q = {
   pinky_03R_043:  eq(0,    0,     1.4),
 };
 
-const TOUCH_Q ={
-  index_01R_017: eq(-0.6, 0, 0.2),
-  ring_01R_033: eq(0.6, 0, 0.2),
-  pinky_01R_041:  eq(0.8, 0, 0)
+const TOUCH_Q = {
+  index_01R_017:  eq(-0.6, 0, 0.2),
+  middle_01R_025: eq( 0.0, 0, 0.2),
+  ring_01R_033:   eq( 0.6, 0, 0.2),
+  pinky_01R_041:  eq( 0.8, 0, 0.0),
 };
 
 // ─── Finger-close pose ────────────────────────────────────────────────────────
-// CH4 r≤900 → index + middle side-by-side (MCP spread → 0)
-// CH5 r≤900 → middle + ring side-by-side
+// SIDE9 (index-side)  r≤900 → index MCP closes toward middle
+// SIDE6 (middle-side) r≤900 → middle MCP closes toward index
+// SIDE7 (ring-side)   r≤900 → ring MCP closes toward middle
+// SIDE8 (pinky-side)  r≤900 → pinky MCP closes toward ring
 const CLOSE_Q = {
-  CH4: { index_01R_017: eq(-0.6, 0, 0), middle_01R_025: eq(0, 0, 0) },
-  CH5: { middle_01R_025: eq(0, 0, 0), ring_01R_033: eq(0.6, 0, 0)  },
+  SIDE9: { index_01R_017:  eq(-0.6, 0, 0), middle_01R_025: eq( 0,   0, 0) },
+  SIDE6: { middle_01R_025: eq( 0,   0, 0), index_01R_017:  eq(-0.6, 0, 0) },
+  SIDE7: { ring_01R_033:   eq( 0.6, 0, 0), middle_01R_025: eq( 0,   0, 0) },
+  SIDE8: { pinky_01R_041:  eq( 0.8, 0, 0), ring_01R_033:   eq( 0.6, 0, 0) },
 };
 
 // ─── Flex → bone mapping ──────────────────────────────────────────────────────
@@ -81,41 +86,55 @@ const FLEX_BONES = {
 };
 
 // ─── IK bone tables ───────────────────────────────────────────────────────────
-// Front pads (CH0-CH3): 3 bones per finger used for z-level interpolation.
-// The thumb tip is aimed at a LIVE-interpolated world position between them —
-// this automatically handles any curl state on the target finger.
+// Front pads (FRONT0-FRONT3): 3 bones per finger for z-level thumb-IK.
+// PAD_FRONT0 = index, FRONT1 = middle, FRONT2 = ring, FRONT3 = pinky.
 const FRONT_IK_BONES = {
-  CH0: ['index_01R_017',  'index_02R_018',  'index_03R_019' ],
-  CH1: ['middle_01R_025', 'middle_02R_026', 'middle_03R_027'],
-  CH2: ['ring_01R_033',   'ring_02R_034',   'ring_03R_035'  ],
-  CH3: ['pinky_01R_041',  'pinky_02R_042',  'pinky_03R_043' ],
+  FRONT0: ['index_01R_017',  'index_02R_018',  'index_03R_019' ],
+  FRONT1: ['middle_01R_025', 'middle_02R_026', 'middle_03R_027'],
+  FRONT2: ['ring_01R_033',   'ring_02R_034',   'ring_03R_035'  ],
+  FRONT3: ['pinky_01R_041',  'pinky_02R_042',  'pinky_03R_043' ],
 };
-// Side pads (CH4-CH5): a distinct bone per z level.
+// Side pads: one bone target per z level.
+// SIDE9 = index side, SIDE6 = middle side, SIDE7 = ring side, SIDE8 = pinky side.
 const SIDE_IK_BONES = {
-  CH4: { 0: 'index_02R_018', 2: 'index_03R_019', 3: 'middle_02R_026', 4: 'middle_03R_027' },
-  CH5: { 0: 'ring_02R_034',  2: 'ring_03R_035',  3: 'pinky_02R_042',  4: 'pinky_03R_043'  },
+  SIDE9: { 0: 'index_02R_018',  2: 'index_03R_019',  3: 'middle_02R_026', 4: 'middle_03R_027' },
+  SIDE6: { 0: 'middle_02R_026', 2: 'middle_03R_027', 3: 'index_02R_018',  4: 'index_03R_019'  },
+  SIDE7: { 0: 'ring_02R_034',   2: 'ring_03R_035',   3: 'middle_02R_026', 4: 'middle_03R_027' },
+  SIDE8: { 0: 'pinky_02R_042',  2: 'pinky_03R_043',  3: 'ring_02R_034',   4: 'ring_03R_035'   },
 };
 
 // ─── Pad state resolver ───────────────────────────────────────────────────────
+// Pad naming from firmware:
+//   PAD_FRONT0..3  → front of index/middle/ring/pinky  (thumb IK target)
+//   PAD_SIDE9      → index side pad
+//   PAD_SIDE6      → middle side pad
+//   PAD_SIDE7      → ring side pad
+//   PAD_SIDE8      → pinky side pad
+//   PAD_TOP / PAD_UNUSED5 / PAD_TEST* → ignored
+const SIDE_PAD_KEYS = new Set(['SIDE6', 'SIDE7', 'SIDE8', 'SIDE9']);
+const FRONT_PAD_KEYS = new Set(['FRONT0', 'FRONT1', 'FRONT2', 'FRONT3']);
+
 function resolvePadState(pads) {
   let thumbCh = null, thumbZ = null;
   const fingerClosePairs = [];
   if (!Array.isArray(pads)) return { thumbCh, thumbZ, fingerClosePairs };
 
   for (const pad of pads) {
+    if (pad.z === -1) continue;                          // sensor inactive
     const ch = pad.n.replace('PAD_', '');
-    if (ch === 'CH6' || pad.z === -1) continue;
 
-    if (ch === 'CH4' || ch === 'CH5') {
-      // r-gate applies to ALL z values on side pads
+    if (SIDE_PAD_KEYS.has(ch)) {
+      // r-gate: low resistance → fingers pressing together → close pose
+      // high resistance → thumb reaching sideways → thumb IK
       if (pad.r <= R_THRESHOLD) {
         fingerClosePairs.push({ ch, z: pad.z });
       } else {
         thumbCh = ch; thumbZ = pad.z;
       }
-    } else {
-      thumbCh = ch; thumbZ = pad.z; // front pad: always thumb
+    } else if (FRONT_PAD_KEYS.has(ch)) {
+      thumbCh = ch; thumbZ = pad.z;                      // front pad: always thumb IK
     }
+    // TOP, UNUSED, TEST pads are intentionally ignored
   }
   return { thumbCh, thumbZ, fingerClosePairs };
 }
@@ -199,18 +218,25 @@ export function HandModel({ sensorData, ...props }) {
     const { thumbCh, thumbZ, fingerClosePairs } = resolvePadState(pads);
 
     fingerClosePairs.forEach(({ ch, z }) => {
-      // Logic for CH4: Index Finger
-      if (ch === 'CH4' && (z === 3 || z === 4)) {
-        targets.index_01R_017 = TOUCH_Q.index_01R_017;
-      } 
-      
-      // Logic for CH5: Ring or Pinky Finger
-      else if (ch === 'CH5') {
-        if (z === 0 || z === 2) {
-          targets.ring_01R_033 = TOUCH_Q.ring_01R_033;
-        } else if (z === 3 || z === 4) {
-          targets.pinky_01R_041 = TOUCH_Q.pinky_01R_041;
-        }
+      // SIDE9 = index-side pad: pull index MCP toward middle
+      if (ch === 'SIDE9') {
+        targets.index_01R_017  = TOUCH_Q.index_01R_017;
+        targets.middle_01R_025 = CLOSE_Q.SIDE9.middle_01R_025;
+      }
+      // SIDE6 = middle-side pad: pull middle MCP toward index
+      else if (ch === 'SIDE6') {
+        targets.middle_01R_025 = TOUCH_Q.middle_01R_025;
+        targets.index_01R_017  = CLOSE_Q.SIDE6.index_01R_017;
+      }
+      // SIDE7 = ring-side pad: pull ring MCP toward middle
+      else if (ch === 'SIDE7') {
+        targets.ring_01R_033   = TOUCH_Q.ring_01R_033;
+        targets.middle_01R_025 = CLOSE_Q.SIDE7.middle_01R_025;
+      }
+      // SIDE8 = pinky-side pad: pull pinky MCP toward ring
+      else if (ch === 'SIDE8') {
+        targets.pinky_01R_041 = TOUCH_Q.pinky_01R_041;
+        targets.ring_01R_033  = CLOSE_Q.SIDE8.ring_01R_033;
       }
     });
 
