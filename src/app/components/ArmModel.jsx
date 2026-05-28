@@ -7,109 +7,149 @@ import * as THREE from 'three';
 
 const LERP_SPEED = 0.18;
 
-// Map your sequential 16 ESP hall-effect quaternions to the matching bones in hand_gesture_1.glb
-const FINGER_BONES_MAP = [
-  "mixamorigThumb1", "mixamorigThumb2", "mixamorigThumb3",
-  "mixamorigIndex1", "mixamorigIndex2", "mixamorigIndex3",
-  "mixamorigMiddle1", "mixamorigMiddle2", "mixamorigMiddle3",
-  "mixamorigRing1", "mixamorigRing2", "mixamorigRing3",
-  "mixamorigPinky1", "mixamorigPinky2", "mixamorigPinky3", "mixamorigPinky4"
+const RIGHT_ARM_BONES = {
+  upperArm: "upper_armR_03",
+  forearm:  "forearmR001_09",
+  hand:     "handR_010",
+};
+const LEFT_ARM_BONES = {
+  upperArm: "upper_armL_07",
+  forearm:  "forearmL001_030",
+  hand:     "handL_031",
+};
+
+const RIGHT_FINGER_BONES = [
+  "thumb01R_023",    "thumb02R_024",    "thumb03R_025",
+  "f_index01R_027",  "f_index02R_028",  "f_index03R_029",
+  "f_middle01R_016", "f_middle02R_017", "f_middle03R_018",
+  "f_ring01R_020",   "f_ring02R_021",   "f_ring03R_022",
+  "f_pinky01R_012",  "f_pinky02R_013",  "f_pinky03R_014",
+  "f_pinky03R_end_053"
+];
+const LEFT_FINGER_BONES = [
+  "thumb01L_048",    "thumb02L_049",    "thumb03L_050",
+  "f_index01L_037",  "f_index02L_038",  "f_index03L_039",
+  "f_middle01L_045", "f_middle02L_046", "f_middle03L_047",
+  "f_ring01L_041",   "f_ring02L_042",   "f_ring03L_043",
+  "f_pinky01L_033",  "f_pinky02L_034",  "f_pinky03L_035",
+  "f_pinky03L_end_058"
 ];
 
-function applyBoneQuaternion(node, quaternionArray, isLeftHand) {
-  if (!node || !quaternionArray || quaternionArray.length < 4) return;
+function getSpreadRotation(boneName, isLeft) {
+  const s = isLeft ? -1 : 1;
+  const euler = new THREE.Euler(0, 0, 0, 'XYZ');
 
-  let [x, y, z, w] = quaternionArray;
+  // For this rig's bone orientation:
+  // X = curl/extend (negative = extend/open)
+  // Y = fan left/right spread between fingers
+  // Z = twist (rarely needed)
 
-  // Mirroring correction for quaternion orientation across the X plane
-  if (isLeftHand) {
-    x = -x;
-    w = -w;
+  if (boneName.includes("thumb")) {
+    euler.set(0.4, 0 * s, -0.2 * s);  // extend out + splay away from palm
+  } else if (boneName.includes("index")) {
+    euler.set(-0.2, 0.15 * s, 0);        // extend + fan outward
+  } else if (boneName.includes("middle")) {
+    euler.set(-0.2, 0, 0);               // extend straight, center anchor
+  } else if (boneName.includes("ring")) {
+    euler.set(-0.2, -0.15 * s, 0);       // extend + fan outward other side
+  } else if (boneName.includes("pinky")) {
+    euler.set(-0.2, -0.3 * s, 0);        // extend + fan far outward
   }
 
-  const targetQ = new THREE.Quaternion(x, y, z, w).normalize();
-  node.quaternion.slerp(targetQ, LERP_SPEED);
+  return new THREE.Quaternion().setFromEuler(euler);
+}
+function applyBoneQuaternion(node, quaternionArray) {
+  if (!node || !quaternionArray || quaternionArray.length < 4) return;
+  const [x, y, z, w] = quaternionArray;
+  node.quaternion.slerp(new THREE.Quaternion(x, y, z, w).normalize(), LERP_SPEED);
 }
 
-// ─── Single Arm/Hand Core Component ───────────────────────────────────────────
-export function SingleArmModel({ sensorData, isLeftHand, ...props }) {
+export function CombinedArmRig({
+  leftHandSensorData,
+  rightHandSensorData,
+  // ↓ NEW: [x, y, z] in radians for each hand's rest pose
+  restRotationR = [3.15, 2.29, 3.15],
+  restRotationL = [3.15, -2.29, 3.15],
+  ...props
+}) {
   const group = useRef();
-  
-  // Load the new GLB file uploaded by user
-  const { scene } = useGLTF('/hand_gesture_1.glb');
+  const { scene } = useGLTF('/first_person_hands_rigged.glb');
   const clone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { nodes } = useGraph(clone);
 
-  // Correct mesh materials if mirrored so they do not render inside-out
-  useMemo(() => {
-    if (isLeftHand) {
-      clone.traverse((child) => {
-        if (child.isMesh) {
-          child.material = child.material.clone();
-          child.material.side = THREE.DoubleSide; 
-        }
-      });
-    }
-  }, [clone, isLeftHand]);
-
+  // Recompute rest quaternions every frame from the live prop values
+  // (cheap — just 2 Euler→Quat conversions per frame)
   useFrame(() => {
     if (!nodes) return;
 
-    // --- 1. Orient the Major Arm IMUs ---
-    if (sensorData?.upperArm) {
-      applyBoneQuaternion(nodes.mixamorigLeftUpArm || nodes.mixamorigRightUpArm, sensorData.upperArm, isLeftHand);
-    }
-    if (sensorData?.forearm) {
-      applyBoneQuaternion(nodes.mixamorigLeftForeArm || nodes.mixamorigRightForeArm, sensorData.forearm, isLeftHand);
-    }
-    if (sensorData?.palm) {
-      applyBoneQuaternion(nodes.mixamorigLeftHand || nodes.mixamorigRightHand, sensorData.palm, isLeftHand);
+    const RIGHT_REST = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(...restRotationR, 'XYZ')
+    );
+    const LEFT_REST = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(...restRotationL, 'XYZ')
+    );
+
+    // ── RIGHT ARM ──────────────────────────────────
+    if (rightHandSensorData?.upperArm)
+      applyBoneQuaternion(nodes[RIGHT_ARM_BONES.upperArm], rightHandSensorData.upperArm);
+    if (rightHandSensorData?.forearm)
+      applyBoneQuaternion(nodes[RIGHT_ARM_BONES.forearm], rightHandSensorData.forearm);
+
+    const rHand = nodes[RIGHT_ARM_BONES.hand];
+    if (rHand) {
+      if (rightHandSensorData?.palm) applyBoneQuaternion(rHand, rightHandSensorData.palm);
+      else rHand.quaternion.slerp(RIGHT_REST, LERP_SPEED);
     }
 
-    // --- 2. Orient Finger Hall Effect Sensors ---
-    if (Array.isArray(sensorData?.fingers)) {
-      sensorData.fingers.forEach((qArray, index) => {
-        const boneName = FINGER_BONES_MAP[index];
-        if (boneName && nodes[boneName]) {
-          applyBoneQuaternion(nodes[boneName], qArray, isLeftHand);
-        }
-      });
+    const hasRF = Array.isArray(rightHandSensorData?.fingers) && rightHandSensorData.fingers.length > 0;
+    RIGHT_FINGER_BONES.forEach((name, i) => {
+      const bone = nodes[name];
+      if (!bone) return;
+      if (hasRF && rightHandSensorData.fingers[i]) applyBoneQuaternion(bone, rightHandSensorData.fingers[i]);
+      else bone.quaternion.slerp(getSpreadRotation(name, false), LERP_SPEED);
+    });
+
+    // ── LEFT ARM ───────────────────────────────────
+    if (leftHandSensorData?.upperArm)
+      applyBoneQuaternion(nodes[LEFT_ARM_BONES.upperArm], leftHandSensorData.upperArm);
+    if (leftHandSensorData?.forearm)
+      applyBoneQuaternion(nodes[LEFT_ARM_BONES.forearm], leftHandSensorData.forearm);
+
+    const lHand = nodes[LEFT_ARM_BONES.hand];
+    if (lHand) {
+      if (leftHandSensorData?.palm) applyBoneQuaternion(lHand, leftHandSensorData.palm);
+      else lHand.quaternion.slerp(LEFT_REST, LERP_SPEED);
     }
+
+    const hasLF = Array.isArray(leftHandSensorData?.fingers) && leftHandSensorData.fingers.length > 0;
+    LEFT_FINGER_BONES.forEach((name, i) => {
+      const bone = nodes[name];
+      if (!bone) return;
+      if (hasLF && leftHandSensorData.fingers[i]) applyBoneQuaternion(bone, leftHandSensorData.fingers[i]);
+      else bone.quaternion.slerp(getSpreadRotation(name, true), LERP_SPEED);
+    });
   });
-
-  // Safe selection of root bone structures present in hand_gesture_1.glb
-  const rootBone = nodes.mixamorigHips || nodes.RootNode || clone;
 
   return (
     <group ref={group} {...props} dispose={null}>
-      <primitive object={rootBone} />
+      <primitive object={nodes.RootNode || clone} />
     </group>
   );
 }
 
-// ─── Main Orchestrator Wrapper Component ──────────────────────────────────────
-export function ArmModel({ leftHandSensorData, rightHandSensorData }) {
+export function ArmModel({ leftHandSensorData, rightHandSensorData, restRotationR, restRotationL }) {
   return (
     <group>
-      {/* Right Hand / Arm (Brought inward to x = 0.55, dropped down to y = -0.1) */}
-      <SingleArmModel 
-        sensorData={rightHandSensorData} 
-        isLeftHand={false} 
-        position={[0, -1, 0]} 
-        rotation={[0, 0, 0]}
-        scale={[0.012, 0.012, 0.012]} 
-      />
-
-      {/* Left Hand / Arm (Brought inward to x = -0.55, dropped down to y = -0.1) */}
-      <SingleArmModel 
-        sensorData={leftHandSensorData} 
-        isLeftHand={true} 
-        position={[0, -1, 0]} 
-        rotation={[0, 0, 0]}
-        scale={[-0.012, 0.012, 0.012]} 
+      <CombinedArmRig
+        leftHandSensorData={leftHandSensorData}
+        rightHandSensorData={rightHandSensorData}
+        restRotationR={restRotationR}
+        restRotationL={restRotationL}
+        position={[0, -0.9, 0]}
+        scale={[0.01, 0.01, 0.01]}
       />
     </group>
   );
 }
 
-useGLTF.preload('/hand_gesture_1.glb');
+useGLTF.preload('/first_person_hands_rigged.glb');

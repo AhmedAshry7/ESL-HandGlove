@@ -230,25 +230,22 @@ function FingerAnglesPanel({ frame }) {
 }
 
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
-function Scene({ sensorData }) {
+// Update the Scene component to accept and forward the props:
+function Scene({ sensorData, restRotationR, restRotationL }) {
   return (
-    <Canvas 
-      camera={{ position: [0, -40, 0], fov: 2 }} 
-      style={{ width: '100%', height: '100%' }}
-    >
+    <Canvas camera={{ position: [0, 0, 1], fov: 65 }} style={{ width: '100%', height: '100%' }}>
       <ambientLight intensity={1.8} />
       <directionalLight position={[5, 10, 5]} intensity={2.5} />
       <pointLight position={[-5, 5, -3]} intensity={0.6} />
-      
-      {/* Feed live sensor stream directly into component references */}
-      <ArmModel 
-        rightHandSensorData={sensorData} 
-        leftHandSensorData={null} 
+      <ArmModel
+        rightHandSensorData={sensorData}
+        leftHandSensorData={sensorData}
+        restRotationR={restRotationR}
+        restRotationL={restRotationL}
       />
     </Canvas>
   );
 }
-
 // ─── Recording modal ──────────────────────────────────────────────────────────
 function RecordingModal({
   signLabel,
@@ -415,6 +412,14 @@ export default function GloveCapture() {
   const [signLabel, setSignLabel]     = useState('');
   const [signInput, setSignInput]     = useState('');
   const [trimRange, setTrimRange]     = useState([0, 100]);
+
+  const [restRotationR, setRestRotationR] = useState([-3.15, 2.29, 3.15]);
+  const [restRotationL, setRestRotationL] = useState([-3.15, -2.29, 3.15]);
+  const [tunerOpen, setTunerOpen] = useState(true);
+
+  // Helper to update a single axis
+  const setR = (axis, val) => setRestRotationR(prev => { const n=[...prev]; n[axis]=val; return n; });
+  const setL = (axis, val) => setRestRotationL(prev => { const n=[...prev]; n[axis]=val; return n; });
 
   // Saved signs (one submission = many signs)
   const [signs, setSigns]             = useState([]); // [{label, frames, trimStart, trimEnd}]
@@ -660,7 +665,7 @@ if (loading) return (<div style={s.page}>
           {/* Live 3-D preview */}
           <div style={s.viewport}>
             <div style={s.viewportLabel}>LIVE PREVIEW</div>
-            <Scene sensorData={currentFrame} />
+            <Scene sensorData={currentFrame} restRotationR={restRotationR} restRotationL={restRotationL} />
             {!currentFrame && (
               <div style={s.viewportOverlay}>
                 <div style={s.viewportIcon}>🧤</div>
@@ -805,6 +810,73 @@ if (loading) return (<div style={s.page}>
           calibrate={calibrateRef}
         />
       )}
+      {/* ── REST POSE TUNER (remove once dialed in) ── */}
+      <div style={{
+        position: 'fixed', bottom: 24, left: 24, zIndex: 100,
+        background: 'rgba(10,12,28,0.97)', border: '1px solid rgba(255,255,255,0.10)',
+        borderRadius: 16, overflow: 'hidden', backdropFilter: 'blur(12px)',
+        width: 320, boxShadow: '0 16px 48px rgba(0,0,0,0.6)'
+      }}>
+        {/* header */}
+        <div
+          onClick={() => setTunerOpen(o => !o)}
+          style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+            padding:'10px 16px', cursor:'pointer', borderBottom: tunerOpen ? '1px solid rgba(255,255,255,0.07)' : 'none' }}
+        >
+          <span style={{ fontSize:11, fontWeight:600, color:'#a0aec0', letterSpacing:'0.8px', textTransform:'uppercase' }}>
+            🎛 Rest Pose Tuner
+          </span>
+          <span style={{ fontSize:11, color:'#4a5568' }}>{tunerOpen ? '▲' : '▼'}</span>
+        </div>
+
+        {tunerOpen && (
+          <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:10 }}>
+            {/* Copy-out button */}
+            <button
+              onClick={() => {
+                const txt = `restRotationR={[${restRotationR.map(v=>v.toFixed(3)).join(', ')}]}\nrestRotationL={[${restRotationL.map(v=>v.toFixed(3)).join(', ')}]}`;
+                navigator.clipboard.writeText(txt);
+              }}
+              style={{ fontSize:11, padding:'6px 12px', background:'rgba(226,185,111,0.10)',
+                color:'#e2b96f', border:'1px solid rgba(226,185,111,0.25)', borderRadius:8, cursor:'pointer' }}
+            >
+              📋 Copy values to clipboard
+            </button>
+
+            {/* Right hand sliders */}
+            <div style={{ fontSize:11, color:'#e2b96f', fontWeight:600, marginTop:4 }}>Right hand</div>
+            {['X', 'Y', 'Z'].map((axis, i) => (
+              <div key={`r${axis}`} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ fontSize:11, color:'#718096', width:14 }}>{axis}</span>
+                <input type="range" min="-3.15" max="3.15" step="0.01"
+                  value={restRotationR[i]}
+                  onChange={e => setR(i, parseFloat(e.target.value))}
+                  style={{ flex:1 }}
+                />
+                <span style={{ fontSize:11, color:'#e2b96f', width:42, textAlign:'right' }}>
+                  {restRotationR[i].toFixed(2)}
+                </span>
+              </div>
+            ))}
+
+            {/* Left hand sliders */}
+            <div style={{ fontSize:11, color:'#60a5fa', fontWeight:600, marginTop:4 }}>Left hand</div>
+            {['X', 'Y', 'Z'].map((axis, i) => (
+              <div key={`l${axis}`} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ fontSize:11, color:'#718096', width:14 }}>{axis}</span>
+                <input type="range" min="-3.15" max="3.15" step="0.01"
+                  value={restRotationL[i]}
+                  onChange={e => setL(i, parseFloat(e.target.value))}
+                  style={{ flex:1 }}
+                />
+                <span style={{ fontSize:11, color:'#60a5fa', width:42, textAlign:'right' }}>
+                  {restRotationL[i].toFixed(2)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
