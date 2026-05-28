@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { HandModel } from "../components/HandModel";
+import { ArmModel } from "../components/ArmModel";
 import Image from "next/image";
 import logo from "../assets/logo.png";
 import { supabase } from "@/lib/supabaseClient";
@@ -134,11 +135,19 @@ function SensorReadingsPanel({ frame }) {
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
 function Scene({ sensorData }) {
   return (
-    <Canvas camera={{ position: [-7, 0, 5], fov: 35 }} style={{ width: '100%', height: '100%' }}>
-      <ambientLight intensity={4} />
-      <pointLight position={[10, 10, 10]} intensity={1.2} />
-      <pointLight position={[-10, -5, -10]} intensity={0.4} color="#e2b96f" />
-      <HandModel sensorData={sensorData} />
+    <Canvas 
+      camera={{ position: [0, -40, 0], fov: 2 }} 
+      style={{ width: '100%', height: '100%' }}
+    >
+      <ambientLight intensity={1.8} />
+      <directionalLight position={[5, 10, 5]} intensity={2.5} />
+      <pointLight position={[-5, 5, -3]} intensity={0.6} />
+      
+      {/* Feed live sensor stream directly into component references */}
+      <ArmModel 
+        rightHandSensorData={sensorData} 
+        leftHandSensorData={sensorData} 
+      />
     </Canvas>
   );
 }
@@ -324,7 +333,7 @@ export default function GloveCapture() {
   useEffect(() => {
     // We connect to the bridge. 
     // The moment this connection opens, the bridge pings the ESP32 for us.ws://
-    const ESP_IP = "172.20.104.242";
+    const ESP_IP = "192.168.1.20";
     const WS_PORT = "82"; // Ensure this matches your WS_PORT in C++
     socketRef.current = new WebSocket(`ws://${ESP_IP}:${WS_PORT}`);
     

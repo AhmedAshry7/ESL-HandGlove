@@ -11,6 +11,7 @@ import toast from "react-hot-toast";
 export default function ModelsPage() {
   const router = useRouter();
   const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
+  const codeLink = process.env.CODE_LINK || "https://colab.research.google.com/drive/12pumKVipWAKbLppJ41ji5-ewFlgNYkTx";
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
@@ -32,42 +33,73 @@ export default function ModelsPage() {
   const languageRef = useRef(null);
   const [trainModelName, setTrainModelName] = useState("");
   const [training, setTraining] = useState(false);
-  const [manualPath, setManualPath] = useState("");
 
+  // Add these new states at the top of ModelsPage component
+  const [progress, setProgress] = useState(0);
+  const [trainingStatus, setTrainingStatus] = useState("idle"); // idle, local-setup, training, completed, failed
+  const socketRef = useRef(null);
 
   const handleTrainSubmit = async (e) => {
       e.preventDefault();
-      setTraining(true);
       if (!trainModelName.trim()) { toast.error("Model name required"); return; }
-      if (!manualPath) { toast.error("Please put a folder path"); return; }
 
-      const payload = {
-          modelName: trainModelName,
-          userId: userId,
-          absolutePath: manualPath
-      };
+      setTraining(true);
+      setTrainingStatus("local-setup");
+      setProgress(0);
 
       try {
-        const response = await fetch(`${backendUrl}/models/train`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+          // 1. Initialize session on backend (we only strictly need the modelName for backend logging now)
+          const response = await fetch(`${backendUrl}/models/train`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ modelName: trainModelName, userId })
+          });
 
-        const result = await response.json();
-        if (response.ok) {
-            toast.success(`Success! Model saved in ${manualPath}.`);
-            setShowTrainModal(false);
-        } else {
-            toast.error(result.error);
-        }
-        setTrainModelName("");
-        setManualPath("");
-    } catch (err) {
-        toast.error("Connection failed");
-    } finally {
-        setTraining(false);
-    }
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Initialization failed");
+
+          const currentSessionId = result.sessionId;
+
+          // 2. Connect to WebSocket for live updates
+          const socketServer = backendUrl.replace('/api', ''); 
+          const io = (await import("socket.io-client")).default;
+          socketRef.current = io(socketServer);
+
+          socketRef.current.on("connect", () => {
+              socketRef.current.emit("join_session", currentSessionId);
+          });
+
+          socketRef.current.on("training_progress", (data) => {
+              setProgress(data.progress);
+              if (data.status === 'training') setTrainingStatus("training");
+              if (data.status === 'completed') {
+                  setTrainingStatus("completed");
+                  toast.success("Training Finished Successfully!");
+                  setTraining(false);
+                  setShowTrainModal(false);
+                  reget();
+                  socketRef.current.disconnect();
+              }
+              if (data.status === 'failed') {
+                  setTrainingStatus("failed");
+                  toast.error(`Training failed: ${data.errorMessage}`);
+                  setTraining(false);
+                  socketRef.current.disconnect();
+              }
+          });
+
+          // 3. Launch Colab passing ONLY the session ID inside the hash (#) fragment
+          // This keeps it clean and strips out scary API endpoints from the URL bar
+          const colabLink = "https://colab.research.google.com/drive/12pumKVipWAKbLppJ41ji5-ewFlgNYkTx";
+          window.open(`${colabLink}#session=${currentSessionId}`, "_blank");
+          
+          toast.success("Google Colab opened! Run the cells to start training.", { icon: "🚀" });
+
+      } catch (err) {
+          toast.error(err.message || "Connection failed");
+          setTraining(false);
+          setTrainingStatus("idle");
+      }
   };
 
   useEffect(() => {
@@ -539,31 +571,43 @@ const extractBaseMidFromPickle = (pickleFile) => {
                 />
               </div>
 
-              {/* Folder Upload */}
-              <div style={s.fieldGroup}>
-                <label style={s.label}>Training Data Directory</label>
-                <input
-                  placeholder="Paste folder path: D:/Data/Batch1"
-                  value={manualPath}
-                  onChange={(e) => setManualPath(e.target.value)}
-                  style={s.input}
-                />
+              {/* Replace the bottom button/status section of your showTrainModal with this snippet */}
+              <div style={{ marginTop: '20px' }}>
+                {!training ? (
+                  <button
+                    className="save-btn"
+                    style={{
+                      ...s.saveBtn,
+                      opacity: (!trainModelName.trim()) ? 0.6 : 1,
+                      cursor: (!trainModelName.trim()) ? 'not-allowed' : 'pointer',
+                      backgroundColor: '#6366f1'
+                    }}
+                    onClick={handleTrainSubmit}
+                    disabled={!trainModelName.trim()}
+                  >
+                    Start Training via Colab
+                  </button>
+                ) : (
+                  <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', fontWeight: '500' }}>
+                      <span style={{ color: '#4a5568' }}>
+                        {trainingStatus === 'local-setup' && 'Waiting for Local Runtime connection in Colab...'}
+                        {trainingStatus === 'training' && 'Model Training Engine Running...'}
+                      </span>
+                      <span style={{ color: '#6366f1' }}>{progress}%</span>
+                    </div>
+                    
+                    {/* Progress Track */}
+                    <div style={{ width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                      <div style={{ width: `${progress}%`, height: '100%', background: '#6366f1', transition: 'width 0.4s ease' }} />
+                    </div>
+                    
+                    <p style={{ fontSize: '11px', color: '#718096', marginTop: '6px', textAlign: 'center' }}>
+                      Do not close this page or your Colab window during processing.
+                    </p>
+                  </div>
+                )}
               </div>
-
-              <button
-                className="save-btn"
-                style={{
-                  ...s.saveBtn,
-                  // Updated validation check
-                  opacity: (!trainModelName.trim()) ? 0.6 : 1,
-                  cursor: 'pointer',
-                  backgroundColor: '#6366f1' // Different color to distinguish "Train" from "Save"
-                }}
-                onClick={handleTrainSubmit}
-                disabled={!trainModelName.trim()}
-                >
-                    {training ? 'Training...' : 'Start Training'}
-                </button>
             </form>
           </div>
         </div>
