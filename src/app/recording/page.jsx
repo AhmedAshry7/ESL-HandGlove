@@ -1,7 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { HandModel } from "../components/HandModel";
 import { ArmModel } from "../components/ArmModel";
 import Image from "next/image";
 import logo from "../assets/logo.png";
@@ -41,6 +40,69 @@ const PAD_META = [
   { key: 'PAD_TEST14', label: 'Test 14',         color: '#4a5568', zones: []              },
   { key: 'PAD_TEST15', label: 'Test 15',         color: '#4a5568', zones: []              },
 ];
+
+const FINGER_LABELS = [
+  { label: 'Pinky Yaw', idx: 0 },
+  { label: 'Pinky MCP', idx: 1 },
+  { label: 'Pinky PIP', idx: 2 },
+  { label: 'Ring Yaw', idx: 3 },
+  { label: 'Ring MCP', idx: 4 },
+  { label: 'Ring PIP', idx: 5 },
+  { label: 'Middle Yaw', idx: 6 },
+  { label: 'Middle MCP', idx: 7 },
+  { label: 'Middle PIP', idx: 8 },
+  { label: 'Index Yaw', idx: 9 },
+  { label: 'Index MCP', idx: 10 },
+  { label: 'Index PIP', idx: 11 },
+  { label: 'Thumb Yaw', idx: 12 },
+  { label: 'Thumb MCP', idx: 13 },
+  { label: 'Thumb PIP', idx: 14 },
+  { label: 'Thumb DIP', idx: 15 },
+];
+
+const FINGER_PACKET_HEADER = 0xF1F2F3F4;
+const FINGER_PACKET_OFFSET = 8;
+const FINGER_PACKET_FLOATS = 16;
+
+function useGloveWebSocket(ipAddress) {
+  const [fingerAngles, setFingerAngles] = useState(null);
+
+  useEffect(() => {
+    if (!ipAddress) return undefined;
+
+    const socket = new WebSocket(`ws://${ipAddress}:81`);
+    socket.binaryType = 'arraybuffer';
+
+    socket.onmessage = async (event) => {
+      try {
+        const buffer = event.data instanceof ArrayBuffer
+          ? event.data
+          : await event.data.arrayBuffer();
+
+        const view = new DataView(buffer);
+        if (view.byteLength < FINGER_PACKET_OFFSET + (FINGER_PACKET_FLOATS * 4)) return;
+
+        const header = view.getUint32(0, true);
+        if (header !== FINGER_PACKET_HEADER) return;
+
+        const floats = new Array(FINGER_PACKET_FLOATS);
+        let offset = FINGER_PACKET_OFFSET;
+        for (let i = 0; i < FINGER_PACKET_FLOATS; i += 1) {
+          floats[i] = view.getFloat32(offset, true);
+          offset += 4;
+        }
+
+        setFingerAngles(floats);
+      } catch (err) {
+        console.error('Glove packet parse error:', err);
+      }
+    };
+
+    return () => socket.close();
+  }, [ipAddress]);
+
+  return fingerAngles;
+}
 
 function SensorReadingsPanel({ frame }) {
   const [open, setOpen] = useState(true);
@@ -132,6 +194,41 @@ function SensorReadingsPanel({ frame }) {
   );
 }
 
+function FingerAnglesPanel({ frame }) {
+  const f = Array.isArray(frame?.fingers) ? frame.fingers : null;
+
+  const fp = {
+    wrap: { background: 'rgba(10,12,28,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, overflow: 'hidden', backdropFilter: 'blur(12px)' },
+    header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)' },
+    title: { fontSize: 12, fontWeight: 600, color: '#a0aec0', letterSpacing: '0.8px', textTransform: 'uppercase' },
+    body: { padding: '10px 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
+    item: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)' },
+    label: { fontSize: 11, color: '#718096' },
+    value: { fontSize: 11.5, color: '#e2b96f', fontVariantNumeric: 'tabular-nums' },
+    empty: { padding: '12px 14px', fontSize: 12, color: '#4a5568' },
+  };
+
+  return (
+    <div style={fp.wrap}>
+      <div style={fp.header}>
+        <span style={fp.title}>🧮 Finger Angles (deg)</span>
+      </div>
+      {!f ? (
+        <div style={fp.empty}>No glove data yet.</div>
+      ) : (
+        <div style={fp.body}>
+          {FINGER_LABELS.map(({ label, idx }) => (
+            <div key={label} style={fp.item}>
+              <span style={fp.label}>{label}</span>
+              <span style={fp.value}>{Number.isFinite(f[idx]) ? f[idx].toFixed(1) : '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
 function Scene({ sensorData }) {
   return (
@@ -146,7 +243,7 @@ function Scene({ sensorData }) {
       {/* Feed live sensor stream directly into component references */}
       <ArmModel 
         rightHandSensorData={sensorData} 
-        leftHandSensorData={sensorData} 
+        leftHandSensorData={null} 
       />
     </Canvas>
   );
@@ -294,9 +391,11 @@ function RecordingModal({
 export default function GloveCapture() {
   const router = useRouter();
 
+  const ESP_IP = "192.168.1.8";
+
   // WebSocket & live frame
-  const socketRef    = useRef(null);
   const [currentFrame, setCurrentFrame] = useState(null);
+  const gloveFingers = useGloveWebSocket(ESP_IP);
 
   const [user, setUser] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -329,32 +428,14 @@ export default function GloveCapture() {
   const frameCount = recordedFrames.length;
   const duration   = (frameCount / 60).toFixed(1);
 
-  // ── WebSocket ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    // We connect to the bridge. 
-    // The moment this connection opens, the bridge pings the ESP32 for us.ws://
-    const ESP_IP = "192.168.1.20";
-    const WS_PORT = "82"; // Ensure this matches your WS_PORT in C++
-    socketRef.current = new WebSocket(`ws://${ESP_IP}:${WS_PORT}`);
-    
-    socketRef.current.onmessage = (event) => {
-      try {
-        const raw = JSON.parse(event.data);
-        console.log("Received WS data:", raw);
-        if (raw.flex || raw.pads) {
-          const frame = { flex: raw.flex ?? {}, pads: raw.pads ?? [] };
-          setCurrentFrame(frame);
-          if (isRecordingRef.current) {
-            setRecordedFrames(prev => [...prev, frame]);
-          }
-        }
-      } catch (err) {
-        console.error("Data parse error:", err);
-      }
-    };
-
-    return () => socketRef.current?.close();
-  }, []);
+    if (!gloveFingers) return;
+    const frame = { fingers: gloveFingers };
+    setCurrentFrame(frame);
+    if (isRecordingRef.current) {
+      setRecordedFrames(prev => [...prev, frame]);
+    }
+  }, [gloveFingers]);
 
   // Keep ref in sync with state
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
@@ -704,6 +785,7 @@ if (loading) return (<div style={s.page}>
           </div>
 
           {/* Live sensor readings panel */}
+          <FingerAnglesPanel frame={currentFrame} />
           <SensorReadingsPanel frame={currentFrame} />
         </div>
       </div>
