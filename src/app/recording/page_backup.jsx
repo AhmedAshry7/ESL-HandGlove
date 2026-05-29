@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { ArmModel, DEFAULT_WRIST_LIMITS, BIOMECHANICAL_LIMITS } from "../components/ArmModel";
+import { ArmModel, DEFAULT_WRIST_LIMITS, DEFAULT_FINGER_LIMITS } from "../components/ArmModel";
 import Image from "next/image";
 import logo from "../assets/logo.png";
 import { supabase } from "@/lib/supabaseClient";
@@ -700,73 +700,14 @@ function LiveVoltageMonitor({ voltages, sensorHealth }) {
   );
 }
 
+// ─── Coupling Calibration UI ──────────────────────────────────────────────────
 function CouplingCalibrationUI({
   couplingByFinger, setCouplingByFinger,
   couplingFinger, setCouplingFinger,
-  onApply, isConnected,
-  takeMedianSamples, setCalError
+  onApply, onAutoDetect, autoDetecting, autoProgress,
+  isConnected, fingerAngles, calStatus,
 }) {
-  const [step, setStep] = useState('idle'); // idle, baseline, pose1, pose2, pose3
-  const [baselines, setBaselines] = useState(null);
-  const [isCapturing, setIsCapturing] = useState(false);
-
-  useEffect(() => {
-    setStep('idle');
-    setBaselines(null);
-  }, [couplingFinger]);
-
-  const [chYaw, chP1, chP2] = CAL_FINGER_DEFAULTS[couplingFinger];
-
-  const captureBaseline = async () => {
-    if (chP1 === -1 || chP2 === -1) { setCalError('Sensors not available'); return; }
-    setIsCapturing(true);
-    try {
-      const medians = await takeMedianSamples(800);
-      setBaselines({
-        yaw: medians[chYaw] ?? 0,
-        p1: medians[chP1],
-        p2: medians[chP2]
-      });
-      setStep('pose1');
-    } catch (e) {
-      setCalError(e.message);
-    } finally {
-      setIsCapturing(false);
-    }
-  };
-
-  const capturePose = async (poseName) => {
-    setIsCapturing(true);
-    try {
-      const medians = await takeMedianSamples(800);
-      const vYaw = medians[chYaw] ?? 0;
-      const vP1 = medians[chP1];
-      const vP2 = medians[chP2];
-
-      setCouplingByFinger(prev => {
-        const next = prev.map(f => [...f]);
-        const coeffs = next[couplingFinger];
-
-        if (poseName === 'pose1') {
-          coeffs[0] = vP1 - baselines.p1;
-          setStep('pose2');
-        } else if (poseName === 'pose2') {
-          coeffs[1] = vP1 - baselines.p1;
-          coeffs[2] = vP2 - baselines.p2;
-          setStep('pose3');
-        } else if (poseName === 'pose3') {
-          coeffs[3] = vP2 - baselines.p2;
-          setStep('done');
-        }
-        return next;
-      });
-    } catch (e) {
-      setCalError(e.message);
-    } finally {
-      setIsCapturing(false);
-    }
-  };
-
+  const coeffs = couplingByFinger[couplingFinger];
   const setCoeff = (i, val) => {
     setCouplingByFinger(prev => {
       const n = prev.map(f => [...f]);
@@ -774,9 +715,16 @@ function CouplingCalibrationUI({
       return n;
     });
   };
+  // Live preview: compensated vs raw pitch for selected finger
+  const raw = fingerAngles?.[couplingFinger];
+  const comp = raw ? {
+    pitch1: +(raw.pitch1 - coeffs[0] * raw.pitch2 - coeffs[1] * raw.yaw).toFixed(2),
+    pitch2: +(raw.pitch2 - coeffs[2] * raw.yaw    - coeffs[3] * raw.pitch1).toFixed(2),
+  } : null;
 
   return (
     <div>
+      {/* Finger selector */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
         {CAL_FINGER_NAMES.map((name, fi) => (
           <button key={name} onClick={() => setCouplingFinger(fi)}
@@ -787,74 +735,52 @@ function CouplingCalibrationUI({
             }}>{name}</button>
         ))}
       </div>
-
-      <div style={{ marginBottom: 16, padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)' }}>
-        <h4 style={{ fontSize: 12, color: '#e2b96f', marginBottom: 8, marginTop: 0 }}>3-Pose Capture</h4>
-        {step === 'idle' && (
-          <div>
-            <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 0 }}>Step 1: Relax hand completely (all joints straight).</p>
-            <button onClick={captureBaseline} disabled={isCapturing} style={{ padding: '6px 12px', borderRadius: 6, background: '#34d399', color: '#000', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}>
-              {isCapturing ? 'Capturing...' : 'Capture Baseline'}
-            </button>
-          </div>
-        )}
-        {step === 'pose1' && (
-          <div>
-            <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 0 }}>Step 2: <b>Bend ONLY the Tip (P2)</b> fully. Keep knuckle (P1) and Yaw relaxed.</p>
-            <button onClick={() => capturePose('pose1')} disabled={isCapturing} style={{ padding: '6px 12px', borderRadius: 6, background: '#60a5fa', color: '#000', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}>
-              {isCapturing ? 'Capturing...' : 'Capture Pose 1'}
-            </button>
-          </div>
-        )}
-        {step === 'pose2' && (
-          <div>
-            <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 0 }}>Step 3: <b>Move ONLY Yaw</b> to max spread. Keep P1 and P2 straight.</p>
-            <button onClick={() => capturePose('pose2')} disabled={isCapturing} style={{ padding: '6px 12px', borderRadius: 6, background: '#60a5fa', color: '#000', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}>
-              {isCapturing ? 'Capturing...' : 'Capture Pose 2'}
-            </button>
-          </div>
-        )}
-        {step === 'pose3' && (
-          <div>
-            <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 0 }}>Step 4: <b>Bend ONLY the Knuckle (P1)</b> fully. Keep Tip (P2) and Yaw relaxed.</p>
-            <button onClick={() => capturePose('pose3')} disabled={isCapturing} style={{ padding: '6px 12px', borderRadius: 6, background: '#60a5fa', color: '#000', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}>
-              {isCapturing ? 'Capturing...' : 'Capture Pose 3'}
-            </button>
-          </div>
-        )}
-        {step === 'done' && (
-          <div>
-            <p style={{ fontSize: 11, color: '#34d399', marginTop: 0 }}>Capture complete! Review coefficients below and click Apply.</p>
-            <button onClick={() => setStep('idle')} style={{ padding: '6px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11 }}>
-              Restart Sequence
-            </button>
-          </div>
-        )}
-      </div>
-
+      {/* 4 coupling sliders */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
         {COUPLING_LABELS.map((lbl, i) => (
           <div key={lbl}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
               <span style={{ fontSize: 11, color: '#a0aec0' }}>{lbl}</span>
-              <span style={{ fontSize: 11, color: '#e2b96f', fontVariantNumeric: 'tabular-nums' }}>{couplingByFinger[couplingFinger][i].toFixed(4)}</span>
+              <span style={{ fontSize: 11, color: '#e2b96f', fontVariantNumeric: 'tabular-nums' }}>{coeffs[i].toFixed(2)}</span>
             </div>
-            <input type="range" min="-1" max="1" step="0.0001"
-              value={couplingByFinger[couplingFinger][i]}
+            <input type="range" min="-1" max="1" step="0.01"
+              value={coeffs[i]}
               onChange={e => setCoeff(i, parseFloat(e.target.value))}
               style={{ width: '100%' }}
             />
           </div>
         ))}
       </div>
-
+      {/* Live preview */}
+      {comp && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)', fontSize: 11 }}>
+          <div style={{ color: '#a0aec0', marginBottom: 6, fontWeight: 600 }}>Live compensation preview — {CAL_FINGER_NAMES[couplingFinger]}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            {[['P1 raw', raw.pitch1.toFixed(2)], ['P1 comp', comp.pitch1], ['P2 raw', raw.pitch2.toFixed(2)], ['P2 comp', comp.pitch2]].map(([k,v]) => (
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 6 }}>
+                <span style={{ color: '#718096' }}>{k}</span>
+                <span style={{ color: k.includes('comp') ? '#34d399' : '#e2b96f', fontVariantNumeric: 'tabular-nums' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Buttons */}
       <div style={{ display: 'flex', gap: 8 }}>
         <button onClick={() => onApply(couplingFinger)} disabled={!isConnected}
           style={{ flex: 1, padding: '9px', borderRadius: 10, fontSize: 12, cursor: isConnected ? 'pointer' : 'not-allowed', fontFamily: "'DM Sans', sans-serif",
             background: 'rgba(226,185,111,0.12)', color: '#e2b96f', border: '1px solid rgba(226,185,111,0.30)', opacity: isConnected ? 1 : 0.5 }}>
           ✓ Apply Coupling
         </button>
+        <button onClick={() => onAutoDetect(couplingFinger)} disabled={!isConnected || autoDetecting}
+          style={{ flex: 1, padding: '9px', borderRadius: 10, fontSize: 12, cursor: isConnected && !autoDetecting ? 'pointer' : 'not-allowed', fontFamily: "'DM Sans', sans-serif",
+            background: autoDetecting ? 'rgba(96,165,250,0.12)' : 'rgba(255,255,255,0.04)', color: autoDetecting ? '#60a5fa' : '#a0aec0', border: `1px solid ${autoDetecting ? 'rgba(96,165,250,0.30)' : 'rgba(255,255,255,0.10)'}` }}>
+          {autoDetecting ? `Auto ${autoProgress}%` : 'Auto-Detect 5s'}
+        </button>
       </div>
+      <p style={{ fontSize: 10, color: '#4a5568', marginTop: 8 }}>
+        Auto-detect: move the finger freely for 5s. Firmware coupling = how much one axis bleeds into another.
+      </p>
     </div>
   );
 }
@@ -1109,7 +1035,7 @@ export default function GloveCapture() {
 
   // Biomechanical constraint limits
   const [wristLimits, setWristLimits] = useState({ ...DEFAULT_WRIST_LIMITS });
-  const [fingerLimits, setFingerLimits] = useState({ ...BIOMECHANICAL_LIMITS });
+  const [fingerLimits, setFingerLimits] = useState({ ...DEFAULT_FINGER_LIMITS });
   const [bioOpen, setBioOpen] = useState(false);
 
   const [calibrationOpen, setCalibrationOpen] = useState(false);
@@ -1135,6 +1061,9 @@ export default function GloveCapture() {
   const [sanityWarnings, setSanityWarnings] = useState([]);
   // New: NVS load banner
   const [nvsBannerVisible, setNvsBannerVisible] = useState(false);
+  // New: coupling auto-detect state
+  const [couplingAutoDetecting, setCouplingAutoDetecting] = useState(false);
+  const [couplingAutoProgress, setCouplingAutoProgress] = useState(0);
   // New: selected finger for coupling panel
   const [couplingFinger, setCouplingFinger] = useState(0);
   // New: calibration panel active tab
@@ -1184,31 +1113,6 @@ export default function GloveCapture() {
     rawWaiterRef.current = { resolve, reject, timer };
   }), []);
 
-  const takeMedianSamples = useCallback(async (durationMs = 800) => {
-    const samples = [];
-    const endTime = Date.now() + durationMs;
-    while (Date.now() < endTime) {
-      const v = gloveFrame.rawVoltagesRef?.current;
-      if (Array.isArray(v) && v.every(val => val !== null)) {
-        samples.push([...v]);
-      }
-      await sleep(20);
-    }
-    if (samples.length === 0) throw new Error('No raw voltage samples received.');
-    
-    const medians = new Array(16);
-    for (let ch = 0; ch < 16; ch++) {
-      const chValues = samples.map(s => s[ch]).filter(Number.isFinite).sort((a, b) => a - b);
-      if (chValues.length === 0) {
-        medians[ch] = null;
-      } else {
-        const mid = Math.floor(chValues.length / 2);
-        medians[ch] = chValues.length % 2 !== 0 ? chValues[mid] : (chValues[mid - 1] + chValues[mid]) / 2;
-      }
-    }
-    return medians;
-  }, [gloveFrame.rawVoltagesRef]);
-
   const sendCommandWsRef = useRef(gloveFrame?.sendCommand);
   useEffect(() => { sendCommandWsRef.current = gloveFrame?.sendCommand; }, [gloveFrame?.sendCommand]);
 
@@ -1255,32 +1159,22 @@ export default function GloveCapture() {
     return warnings;
   };
 
-  // Capture current live-stream voltage using median over 800ms
-  const captureStep = useCallback(async () => {
+  // Capture current live-stream voltage (no new REQUEST_RAW needed — firmware sends automatically at 50Hz)
+  const captureStep = useCallback(() => {
     if (captureBusy || !axisAvailable) return;
     const stepIdx = axisKnots.findIndex((val) => !Number.isFinite(val));
     if (stepIdx === -1) return;
     const sensorIdx = CAL_FINGER_DEFAULTS[calFinger][calAxis];
     if (sensorIdx === -1) { setCalError('Selected axis is not available for this finger.'); return; }
-    
-    setCaptureBusy(true);
-    try {
-      setCalError(null);
-      const medians = await takeMedianSamples(800);
-      const voltage = medians[sensorIdx];
-      
-      if (!Number.isFinite(voltage)) {
-        setCalError('No live voltage reading yet — ensure glove is connected and streaming.');
-        return;
-      }
-      
-      setCaptureConfirm({ voltage, stepIdx });
-    } catch (err) {
-      setCalError(err.message);
-    } finally {
-      setCaptureBusy(false);
+    const voltage = gloveFrame.rawVoltagesRef?.current?.[sensorIdx];
+    if (!Number.isFinite(voltage)) {
+      setCalError('No live voltage reading yet — ensure glove is connected and streaming.');
+      return;
     }
-  }, [captureBusy, axisAvailable, axisKnots, calFinger, calAxis, takeMedianSamples]);
+    setCalError(null);
+    // Show confirm dialog instead of immediately saving
+    setCaptureConfirm({ voltage, stepIdx });
+  }, [captureBusy, axisAvailable, axisKnots, calFinger, calAxis, gloveFrame]);
 
   // Confirm a pending capture
   const confirmCapture = useCallback(() => {
@@ -1345,7 +1239,49 @@ export default function GloveCapture() {
     }
   }, [calFinger, couplingInput, sendCommandUnified]);
 
-
+  // Auto-detect coupling via 5-second linear regression on live raw voltages
+  const startCouplingAutoDetect = useCallback(async (fingerIdx) => {
+    if (couplingAutoDetecting) return;
+    setCouplingAutoDetecting(true);
+    setCouplingAutoProgress(0);
+    setCalError(null);
+    const samples = [];
+    const durationMs = 5000;
+    const endTime = Date.now() + durationMs;
+    while (Date.now() < endTime) {
+      const v = gloveFrame.rawVoltagesRef?.current;
+      if (Array.isArray(v)) samples.push([...v]);
+      setCouplingAutoProgress(Math.round((1 - (endTime - Date.now()) / durationMs) * 100));
+      await sleep(80);
+    }
+    setCouplingAutoProgress(100);
+    if (samples.length < 10) {
+      setCalError('Not enough samples for auto-detect — ensure glove is streaming raw voltages.');
+      setCouplingAutoDetecting(false);
+      return;
+    }
+    const [chYaw, chP1, chP2] = CAL_FINGER_DEFAULTS[fingerIdx];
+    const linReg = (xs, ys) => {
+      const n = xs.length;
+      const mx = xs.reduce((a, b) => a + b, 0) / n;
+      const my = ys.reduce((a, b) => a + b, 0) / n;
+      const cov = xs.reduce((s, xi, i) => s + (xi - mx) * (ys[i] - my), 0) / n;
+      const vx = xs.reduce((s, xi) => s + (xi - mx) ** 2, 0) / n;
+      return vx < 1e-9 ? 0 : cov / vx;
+    };
+    const get = (ch) => ch === -1 ? samples.map(() => 0) : samples.map(s => s[ch] ?? 0);
+    const yaw = get(chYaw), p1 = get(chP1), p2 = get(chP2);
+    const clamp = v => Math.max(-1, Math.min(1, parseFloat(v.toFixed(3))));
+    const newCoeffs = [
+      clamp(linReg(p2, p1)),   // p2→p1
+      clamp(linReg(yaw, p1)),  // yaw→p1
+      clamp(linReg(yaw, p2)),  // yaw→p2
+      clamp(linReg(p1, p2)),   // p1→p2
+    ];
+    setCouplingByFinger(prev => { const n = prev.map(f => [...f]); n[fingerIdx] = newCoeffs; return n; });
+    setCouplingAutoDetecting(false);
+    setCouplingAutoProgress(0);
+  }, [couplingAutoDetecting, gloveFrame]);
 
   // Export calibration JSON
   const handleExportCal = useCallback(() => {
@@ -1989,9 +1925,12 @@ if (loading) return (<div style={s.page}>
                       couplingFinger={couplingFinger}
                       setCouplingFinger={setCouplingFinger}
                       onApply={sendCouplingSliders}
+                      onAutoDetect={startCouplingAutoDetect}
+                      autoDetecting={couplingAutoDetecting}
+                      autoProgress={couplingAutoProgress}
                       isConnected={isConnected}
-                      takeMedianSamples={takeMedianSamples}
-                      setCalError={setCalError}
+                      fingerAngles={currentFrame?.fingerAngles ?? null}
+                      calStatus={currentFrame?.calStatus ?? 0}
                     />
                   </div>
                 </div>

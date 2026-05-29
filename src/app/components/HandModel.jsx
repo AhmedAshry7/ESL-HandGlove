@@ -6,7 +6,7 @@ import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const LERP_SPEED       = 0.18;
+const LERP_SPEED       = 1;
 const CURL_THRESHOLD   = 0.6;   // PIP / DIP sensors
 const CURL_THRESHOLD_MCP = 0.4; // MCP sensors (more sensitive)
 const R_THRESHOLD      = 900;   // ADC below this → two-finger press

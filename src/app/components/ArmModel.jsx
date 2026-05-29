@@ -5,7 +5,7 @@ import { useGLTF } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 
-const LERP_SPEED = 0.18;
+const LERP_SPEED = 1;
 
 const RIGHT_ARM_BONES = {
   upperArm: "upper_armR_03",
@@ -45,12 +45,12 @@ export const DEFAULT_WRIST_LIMITS = {
   supination:90,   // max rotation other way (-Z)
 };
 
-// Default finger limits (degrees)
-export const DEFAULT_FINGER_LIMITS = {
-  pitchMin: -5,    // slight hyper-extension allowed
-  pitchMax: 110,   // max curl
-  yawMin:   -25,   // max spread outward
-  yawMax:    25,   // max spread inward (when open)
+export const BIOMECHANICAL_LIMITS = {
+  pinky:  { yaw: [-20, 20], mcp: [0, 90], pip: [0, 100] },
+  ring:   { yaw: [-15, 15], mcp: [0, 90], pip: [0, 100] },
+  middle: { yaw: [-10, 10], mcp: [0, 90], pip: [0, 100] },
+  index:  { yaw: [-20, 20], mcp: [0, 90], pip: [0, 100] },
+  thumb:  { yaw: [-15, 60], mcp: [0, 60], ip:  [0, 80], thumbExtra: [0, 80] }
 };
 
 function clamp(val, min, max) {
@@ -76,17 +76,66 @@ function clampWristQuat(quatArray, limits) {
   return [clamped.x, clamped.y, clamped.z, clamped.w];
 }
 
+function getFingerJointLimits(boneName, allLimits) {
+  if (!allLimits) return null;
+  let fingerKey = null;
+  if (boneName.includes("thumb")) fingerKey = "thumb";
+  else if (boneName.includes("index")) fingerKey = "index";
+  else if (boneName.includes("middle")) fingerKey = "middle";
+  else if (boneName.includes("ring")) fingerKey = "ring";
+  else if (boneName.includes("pinky")) fingerKey = "pinky";
+
+  if (!fingerKey) return null;
+  const fLimits = allLimits[fingerKey];
+  if (!fLimits) return null;
+
+  let yawMin = 0, yawMax = 0, pitchMin = 0, pitchMax = 0;
+
+  if (boneName.includes("01")) {
+    // MCP
+    yawMin = fLimits.yaw[0];
+    yawMax = fLimits.yaw[1];
+    pitchMin = fLimits.mcp[0];
+    pitchMax = fLimits.mcp[1];
+  } else if (boneName.includes("02")) {
+    // PIP
+    if (fingerKey === "thumb") {
+      pitchMin = fLimits.ip[0];
+      pitchMax = fLimits.ip[1];
+    } else {
+      pitchMin = fLimits.pip[0];
+      pitchMax = fLimits.pip[1];
+    }
+  } else if (boneName.includes("03") || boneName.includes("end")) {
+    // DIP / IP
+    if (fingerKey === "thumb") {
+      pitchMin = fLimits.thumbExtra ? fLimits.thumbExtra[0] : fLimits.ip[0];
+      pitchMax = fLimits.thumbExtra ? fLimits.thumbExtra[1] : fLimits.ip[1];
+    } else {
+      pitchMin = fLimits.pip[0];
+      pitchMax = fLimits.pip[1];
+    }
+  } else {
+    return null;
+  }
+
+  return { yawMin, yawMax, pitchMin, pitchMax };
+}
+
 /**
  * Apply biomechanical clamps to a finger bone quaternion.
  * Pitch (X) = curl/extend. Yaw (Y) = spread. Z left alone.
  */
-function clampFingerQuat(quatArray, limits) {
+function clampFingerQuat(quatArray, boneName, allLimits) {
   const [x, y, z, w] = quatArray;
   const q = new THREE.Quaternion(x, y, z, w).normalize();
   const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
 
-  euler.x = clamp(euler.x, limits.pitchMin * DEG2RAD, limits.pitchMax * DEG2RAD);
-  euler.y = clamp(euler.y, limits.yawMin   * DEG2RAD, limits.yawMax   * DEG2RAD);
+  const limits = getFingerJointLimits(boneName, allLimits);
+  if (limits) {
+    euler.x = clamp(euler.x, limits.pitchMin * DEG2RAD, limits.pitchMax * DEG2RAD);
+    euler.y = clamp(euler.y, limits.yawMin   * DEG2RAD, limits.yawMax   * DEG2RAD);
+  }
 
   const clamped = new THREE.Quaternion().setFromEuler(euler);
   return [clamped.x, clamped.y, clamped.z, clamped.w];
@@ -124,7 +173,7 @@ export function CombinedArmRig({
   restRotationL = [3.15, -2.29, 3.15],
   // Biomechanical constraints — pass null/undefined to disable clamping
   wristLimits   = DEFAULT_WRIST_LIMITS,
-  fingerLimits  = DEFAULT_FINGER_LIMITS,
+  fingerLimits  = BIOMECHANICAL_LIMITS,
   ...props
 }) {
   const group = useRef();
@@ -162,7 +211,7 @@ export function CombinedArmRig({
       if (!bone) return;
       if (hasRF && rightHandSensorData.fingers[i]) {
         const fq = fingerLimits
-          ? clampFingerQuat(rightHandSensorData.fingers[i], fingerLimits)
+          ? clampFingerQuat(rightHandSensorData.fingers[i], name, fingerLimits)
           : rightHandSensorData.fingers[i];
         applyBoneQuaternion(bone, fq);
       } else {
@@ -190,7 +239,7 @@ export function CombinedArmRig({
       if (!bone) return;
       if (hasLF && leftHandSensorData.fingers[i]) {
         const fq = fingerLimits
-          ? clampFingerQuat(leftHandSensorData.fingers[i], fingerLimits)
+          ? clampFingerQuat(leftHandSensorData.fingers[i], name, fingerLimits)
           : leftHandSensorData.fingers[i];
         applyBoneQuaternion(bone, fq);
       } else {
