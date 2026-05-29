@@ -399,7 +399,7 @@ export default function SubmissionsPage() {
               onClick={() => handleDownload(selected)}
               disabled={selectedCount === 0}
             >
-              ↓ Download Selected
+              Download Selected
             </button>
             <button
               className="action-btn"
@@ -407,7 +407,7 @@ export default function SubmissionsPage() {
               onClick={() => setShowMergeModal(true)}
               disabled={selectedCount < 2}
             >
-              ⊕ Merge Selected
+              Merge Selected
             </button>
           </div>
           <button

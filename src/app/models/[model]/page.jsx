@@ -309,7 +309,7 @@ const handleDownload = (selected) => {
               onClick={() => handleDownload(selected)}
               disabled={selectedCount === 0}
             >
-              ↓ Download Selected
+              Download Selected
             </button>
           </div>
           <button
