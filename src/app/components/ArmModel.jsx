@@ -46,10 +46,10 @@ export const DEFAULT_WRIST_LIMITS = {
 };
 
 export const BIOMECHANICAL_LIMITS = {
-  pinky:  { yaw: [-20, 20], mcp: [0, 90], pip: [0, 100] },
-  ring:   { yaw: [-15, 15], mcp: [0, 90], pip: [0, 100] },
-  middle: { yaw: [-10, 10], mcp: [0, 90], pip: [0, 100] },
-  index:  { yaw: [-20, 20], mcp: [0, 90], pip: [0, 100] },
+  pinky:  { yaw: [-20, 20], mcp: [-10, 90], pip: [0, 100] },
+  ring:   { yaw: [-15, 15], mcp: [-10, 90], pip: [0, 100] },
+  middle: { yaw: [-10, 10], mcp: [-10, 90], pip: [0, 100] },
+  index:  { yaw: [-20, 20], mcp: [-10, 90], pip: [0, 100] },
   thumb:  { yaw: [-60, 15], mcp: [-50, 50], ip:  [0, 60], thumbExtra: [0, 80] }
 };
 
@@ -124,19 +124,28 @@ function getFingerJointLimits(boneName, allLimits) {
   return { yawMin, yawMax, pitchMin, pitchMax };
 }
 
-function clampFingerEuler(eulerArray, boneName, allLimits) {
+function clampFingerEuler(eulerArray, boneName, allLimits, isLeft = false) {
   let [x, y, z] = eulerArray;
 
   const limits = getFingerJointLimits(boneName, allLimits);
   if (limits) {
+    let { yawMin, yawMax, pitchMin, pitchMax } = limits;
+    
+    // Mirror asymmetric yaw limits for the left hand
+    if (isLeft) {
+      const tempMin = yawMin;
+      yawMin = -yawMax;
+      yawMax = -tempMin;
+    }
+
     if (boneName.includes("thumb")) {
-      x = clamp(x, limits.yawMin   * DEG2RAD, limits.yawMax   * DEG2RAD);
-      z = clamp(z, limits.pitchMin * DEG2RAD, limits.pitchMax * DEG2RAD);
+      x = clamp(x, yawMin   * DEG2RAD, yawMax   * DEG2RAD);
+      z = clamp(z, pitchMin * DEG2RAD, pitchMax * DEG2RAD);
     } else {
       // Non-thumb fingers curl inward on negative X, but limits are positive (0 to 90).
       // We negate x for clamping against the positive range, then restore the sign.
-      x = -clamp(-x, limits.pitchMin * DEG2RAD, limits.pitchMax * DEG2RAD);
-      z = clamp(z, limits.yawMin   * DEG2RAD, limits.yawMax   * DEG2RAD);
+      x = -clamp(-x, pitchMin * DEG2RAD, pitchMax * DEG2RAD);
+      z = clamp(z, yawMin   * DEG2RAD, yawMax   * DEG2RAD);
     }
   }
 
@@ -253,7 +262,7 @@ export function CombinedArmRig({
       if (!bone) return;
       if (hasLF && leftHandSensorData.fingers[i]) {
         const fe = fingerLimits
-          ? clampFingerEuler(leftHandSensorData.fingers[i], name, fingerLimits)
+          ? clampFingerEuler(leftHandSensorData.fingers[i], name, fingerLimits, true)
           : leftHandSensorData.fingers[i];
         applyBoneEuler(bone, fe);
       } else {

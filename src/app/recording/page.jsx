@@ -35,7 +35,9 @@ const FINGER_LABELS = [
 
 const IMU_PACKET_HEADER = 0xAABBCCDD;
 const FINGER_PACKET_HEADER = 0xF1F2F3F4;
+const DUAL_FINGER_PACKET_HEADER = 0xF1F2F3F5;
 const RAW_VOLTAGES_PACKET_HEADER = 0xC0DEC0DE;
+const DUAL_RAW_VOLTAGES_PACKET_HEADER = 0xC0DEC0DF;
 // Finger packet layout per spec: 4 header + 4 ts + 60 angles + 4 thumbExtra + 1 calStatus = 73
 const FINGER_PACKET_MIN_SIZE = 73;
 const FINGER_PACKET_OFFSET = 8;   // first angle byte
@@ -117,13 +119,18 @@ const toRad = (deg) => (Number.isFinite(deg) ? deg : 0) * DEG2RAD;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function buildCommandBuffer(cmdId, payload) {
-  if (!payload || payload.length === 0) {
-    return new Uint8Array([cmdId]);
+function buildCommandBuffer(cmdId, payload, isLeft = false) {
+  const prefixSize = isLeft ? 1 : 0;
+  const payloadSize = payload ? payload.length : 0;
+  const buf = new Uint8Array(prefixSize + 1 + payloadSize);
+  let offset = 0;
+  if (isLeft) {
+    buf[offset++] = 0xA0;
   }
-  const buf = new Uint8Array(1 + payload.length);
-  buf[0] = cmdId;
-  buf.set(payload, 1);
+  buf[offset++] = cmdId;
+  if (payload && payloadSize > 0) {
+    buf.set(payload, offset);
+  }
   return buf;
 }
 
@@ -164,7 +171,7 @@ function isFingerCalibrated(calStatus, fingerIdx) {
  * calStatus bitmask: bit0=Pinky, bit1=Ring, bit2=Middle, bit3=Index, bit4=Thumb.
  * Uncalibrated fingers stay in rest pose (null slots → ArmModel uses getSpreadRotation).
  */
-function buildFingerEulers(fingers, thumbExtra, calStatus = 0xFF) {
+function buildFingerEulers(fingers, thumbExtra, calStatus = 0xFF, isLeft = false) {
   if (!Array.isArray(fingers) || fingers.length < 5) return null;
   // Packet order: [Pinky=0, Ring=1, Middle=2, Index=3, Thumb=4]
   const pinky = fingers[0] ?? EMPTY_FINGER;
@@ -172,15 +179,15 @@ function buildFingerEulers(fingers, thumbExtra, calStatus = 0xFF) {
   const middle = fingers[2] ?? EMPTY_FINGER;
   const index = fingers[3] ?? EMPTY_FINGER;
   const thumb = fingers[4] ?? EMPTY_FINGER;
-  
+
   // Unity script New_Magnets.cs mapping:
   // Thumb: X=0, Y=Yaw, Z=Pitch (Positive Z curls inward)
   // Others: X=Pitch, Y=0, Z=Yaw (Negative X curls inward in Three.js right-handed system)
-  const thumbMcpEuler = (f) => [toRad(f.yaw), 0, toRad(f.pitch1)];
+  const thumbMcpEuler = (f) => [isLeft ? -toRad(f.yaw) : toRad(f.yaw), 0, toRad(f.pitch1)];
   const thumbPipEuler = (f) => [0, 0, toRad(f.pitch2)];
   const thumbIpEuler = [0, 0, toRad(thumbExtra)];
 
-  const fingerMcpEuler = (f) => [-toRad(f.pitch1), 0, toRad(f.yaw)];
+  const fingerMcpEuler = (f) => [-toRad(f.pitch1), 0, isLeft ? -toRad(f.yaw) : toRad(f.yaw)];
   const fingerPipEuler = (f) => [-toRad(f.pitch2), 0, 0];
 
   // Only apply eulers for calibrated fingers; null → ArmModel falls back to rest spread
@@ -212,11 +219,18 @@ function buildFingerEulers(fingers, thumbExtra, calStatus = 0xFF) {
 
 function buildRigData(frame) {
   if (!frame) return null;
-  const fingers = buildFingerEulers(frame.fingerAngles, frame.thumbExtra ?? 0, frame.calStatus ?? 0xFF);
+  const rightFingers = buildFingerEulers(frame.fingerAngles, frame.thumbExtra ?? 0, frame.calStatus ?? 0xFF, false);
+  const leftFingers = buildFingerEulers(frame.leftFingerAngles, frame.leftThumbExtra ?? 0, frame.leftCalStatus ?? 0xFF, true);
 
   return {
-    palm: frame.imuQuat ?? undefined,
-    fingers: fingers ?? undefined,
+    right: {
+      palm: frame.imuQuat ?? undefined,
+      fingers: rightFingers ?? undefined,
+    },
+    left: {
+      palm: frame.leftImuQuat ?? undefined,
+      fingers: leftFingers ?? undefined,
+    }
   };
 }
 
@@ -229,6 +243,11 @@ function useGloveWebSocket(ipAddress, onFrame) {
     fingerAnglesFlat: null,
     thumbExtra: 0,
     calStatus: 0,       // bitmask — 0 = no fingers calibrated
+    leftFingerAngles: null,
+    leftFingerAnglesFlat: null,
+    leftThumbExtra: 0,
+    leftCalStatus: 0,
+    leftConnected: false,
     imuTimestamp: null,
     fingerTimestamp: null,
     imuDiag: null,
@@ -359,6 +378,94 @@ function useGloveWebSocket(ipAddress, onFrame) {
           return;
         }
 
+        if (header === DUAL_RAW_VOLTAGES_PACKET_HEADER) {
+          if (view.byteLength < 137) return;
+          const timestamp = view.getUint32(4, true);
+          const rightVoltages = new Array(16);
+          for (let i = 0; i < 16; i += 1) {
+            rightVoltages[i] = view.getFloat32(8 + i * 4, true);
+          }
+          const leftVoltages = new Array(16);
+          for (let i = 0; i < 16; i += 1) {
+            leftVoltages[i] = view.getFloat32(72 + i * 4, true);
+          }
+          const leftConnected = view.getUint8(136) === 1;
+          
+          if (onFrame) {
+            onFrame({ source: 'raw_dual', rightVoltages, leftVoltages, timestamp, leftConnected });
+          }
+          return;
+        }
+
+        if (header === DUAL_FINGER_PACKET_HEADER) {
+          if (view.byteLength < 139) return;
+          const timestamp = view.getUint32(4, true);
+
+          const rightFingers = [];
+          for (let f = 0; f < 5; f += 1) {
+            const base = 8 + f * 12;
+            rightFingers.push({
+              yaw: view.getFloat32(base + 0, true),
+              pitch1: view.getFloat32(base + 4, true),
+              pitch2: view.getFloat32(base + 8, true),
+            });
+          }
+          const thumbExtra = view.getFloat32(68, true);
+          const calStatus = view.getUint8(72);
+
+          const leftFingers = [];
+          for (let f = 0; f < 5; f += 1) {
+            const base = 73 + f * 12;
+            leftFingers.push({
+              yaw: view.getFloat32(base + 0, true),
+              pitch1: view.getFloat32(base + 4, true),
+              pitch2: view.getFloat32(base + 8, true),
+            });
+          }
+          const leftThumbExtra = view.getFloat32(133, true);
+          const leftCalStatus = view.getUint8(137);
+          const leftConnected = view.getUint8(138) === 1;
+
+          const floats = [...rightFingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), thumbExtra];
+          const leftFloats = [...leftFingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), leftThumbExtra];
+
+          fingerAnglesRef.current = rightFingers;
+          fingerAnglesFlatRef.current = floats;
+          thumbExtraRef.current = thumbExtra;
+
+          setGloveState(prev => ({
+            ...prev,
+            fingerAngles: rightFingers,
+            fingerAnglesFlat: floats,
+            thumbExtra,
+            calStatus,
+            leftFingerAngles: leftFingers,
+            leftFingerAnglesFlat: leftFloats,
+            leftThumbExtra,
+            leftCalStatus,
+            leftConnected,
+            fingerTimestamp: timestamp,
+          }));
+
+          if (onFrame) {
+            onFrame({
+              source: 'finger',
+              fingers: floats,
+              fingerAngles: rightFingers,
+              thumbExtra,
+              calStatus,
+              leftFingerAnglesFlat: leftFloats,
+              leftFingerAngles: leftFingers,
+              leftThumbExtra,
+              leftCalStatus,
+              imuQuat: imuQuatRef.current,
+              flex: {},
+              pads: [],
+            });
+          }
+          return;
+        }
+
         if (header !== FINGER_PACKET_HEADER) return;
         // Spec: 4 header + 4 ts + 60 angles + 4 thumbExtra + 1 calStatus = 73 bytes
         if (view.byteLength < FINGER_PACKET_MIN_SIZE) return;
@@ -420,9 +527,9 @@ function useGloveWebSocket(ipAddress, onFrame) {
     return () => socket.close();
   }, [ipAddress, onFrame, connectionId]);
 
-  const sendCommand = useCallback((cmdId, payload) => {
+  const sendCommand = useCallback((cmdId, payload, isLeft = false) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(buildCommandBuffer(cmdId, payload));
+      wsRef.current.send(buildCommandBuffer(cmdId, payload, isLeft));
     }
   }, []);
 
@@ -902,8 +1009,8 @@ function Scene({ rigData, restRotationR, restRotationL, wristLimits, fingerLimit
       <directionalLight position={[5, 10, 5]} intensity={2.5} />
       <pointLight position={[-5, 5, -3]} intensity={0.6} />
       <ArmModel
-        rightHandSensorData={rigData}
-        leftHandSensorData={rigData}
+        rightHandSensorData={rigData?.right}
+        leftHandSensorData={rigData?.left}
         restRotationR={restRotationR}
         restRotationL={restRotationL}
         wristLimits={wristLimits}
@@ -1087,13 +1194,18 @@ export default function GloveCapture() {
       return;
     }
 
-    if (frame?.source === 'raw') {
-      setRawVoltages(frame.voltages);
+    if (frame?.source === 'raw' || frame?.source === 'raw_dual') {
+      let voltages = frame.voltages;
+      if (frame?.source === 'raw_dual') {
+        voltages = calHandRef.current === 'left' ? frame.leftVoltages : frame.rightVoltages;
+      }
+      
+      setRawVoltages(voltages);
       // Track per-channel variance for 30s dead-sensor detection
       const now = Date.now();
       const hist = sensorHistoryRef.current;
       let changed = false;
-      frame.voltages.forEach((v, ch) => {
+      voltages.forEach((v, ch) => {
         if (!Number.isFinite(v)) return;
         const h = hist[ch];
         h.samples.push({ t: now, v });
@@ -1113,7 +1225,7 @@ export default function GloveCapture() {
         const waiter = rawWaiterRef.current;
         rawWaiterRef.current = null;
         clearTimeout(waiter.timer);
-        waiter.resolve(frame.voltages);
+        waiter.resolve(voltages);
       }
       return;
     }
@@ -1133,6 +1245,12 @@ export default function GloveCapture() {
       fingerAngles: gloveFrame.fingerAngles,
       thumbExtra: gloveFrame.thumbExtra,
       calStatus: gloveFrame.calStatus ?? 0,
+      
+      leftFingers: gloveFrame.leftFingerAnglesFlat,
+      leftFingerAngles: gloveFrame.leftFingerAngles,
+      leftThumbExtra: gloveFrame.leftThumbExtra,
+      leftCalStatus: gloveFrame.leftCalStatus ?? 0,
+
       imuQuat: gloveFrame.imuQuat,
       imuDiag: gloveFrame.imuDiag ?? null,
       flex: {},
@@ -1204,9 +1322,13 @@ export default function GloveCapture() {
   const [knotsByAxis, setKnotsByAxis] = useState(() => (
     Array.from({ length: 5 }, () => Array.from({ length: 4 }, () => Array(5).fill(null)))
   ));
-  // New: coupling sliders (5 fingers × 4 coefficients)
+  const [calHand, setCalHand] = useState('right');
+  const calHandRef = useRef('right');
+  useEffect(() => { calHandRef.current = calHand; }, [calHand]);
+
+  // New: coupling sliders (5 fingers × 6 coefficients)
   const [couplingByFinger, setCouplingByFinger] = useState(() =>
-    Array.from({ length: 5 }, () => [0, 0, 0, 0])
+    Array.from({ length: 5 }, () => [0, 0, 0, 0, 0, 0])
   );
   const [couplingInput, setCouplingInput] = useState('0,0,0,0');
   // New: knot sanity warnings
@@ -1291,7 +1413,7 @@ export default function GloveCapture() {
   useEffect(() => { sendCommandWsRef.current = gloveFrame?.sendCommand; }, [gloveFrame?.sendCommand]);
 
   const sendCommandUnified = useCallback(async (cmdId, payload) => {
-    if (sendCommandWsRef.current) sendCommandWsRef.current(cmdId, payload);
+    if (sendCommandWsRef.current) sendCommandWsRef.current(cmdId, payload, calHandRef.current === 'left');
   }, []);
 
   const runCommand = useCallback(async (cmdId, payload) => {
@@ -1926,7 +2048,25 @@ export default function GloveCapture() {
               )}
 
               {/* Cal Status inline */}
-              <CalStatusStrip calStatus={currentFrame?.calStatus ?? 0} knotsByAxis={knotsByAxis} />
+              <CalStatusStrip calStatus={calHand === 'left' ? (currentFrame?.leftCalStatus ?? 0) : (currentFrame?.calStatus ?? 0)} knotsByAxis={knotsByAxis} />
+
+              {/* Hand Toggle */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 8, background: 'rgba(0,0,0,0.2)', padding: '6px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                {['right', 'left'].map(hand => (
+                  <button
+                    key={hand}
+                    onClick={() => setCalHand(hand)}
+                    style={{
+                      flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 'bold', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                      background: calHand === hand ? '#60a5fa' : 'transparent',
+                      color: calHand === hand ? '#000' : '#a0aec0',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {hand} Hand
+                  </button>
+                ))}
+              </div>
 
               {/* Tab navigation */}
               <div style={{ display: 'flex', gap: 4, marginTop: 14, marginBottom: 2, borderBottom: '1px solid rgba(255,255,255,0.07)', paddingBottom: 0 }}>
@@ -2291,8 +2431,8 @@ export default function GloveCapture() {
               {/* Finger limits */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 11, color: '#60a5fa', fontWeight: 600 }}>Fingers (degrees)</span>
-                <select 
-                  value={bioFingerTab} 
+                <select
+                  value={bioFingerTab}
                   onChange={e => setBioFingerTab(e.target.value)}
                   style={{ fontSize: 10, background: 'rgba(0,0,0,0.5)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, padding: '2px 4px' }}
                 >
@@ -2362,7 +2502,7 @@ export default function GloveCapture() {
                         <span style={{ fontSize: 11, color: '#a0aec0' }}>{name}</span>
                         <span style={{ fontSize: 11, color: '#e2b96f' }}>{`Yaw(${yawAxis}) ${Math.round(manualFingers[fi].yaw)}° • P1(${pitchAxis}) ${Math.round(manualFingers[fi].pitch1)}° • P2(${pitchAxis}) ${Math.round(manualFingers[fi].pitch2)}°`}</span>
                       </div>
-                      <div style={{ display: 'flex',flexDirection:'column', gap: 24 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                         <input type="range" min="-90" max="90" step="1" value={manualFingers[fi].yaw} title={`Yaw (${yawAxis})`}
                           onChange={e => setManualFingers(prev => { const n = prev.map(f => ({ ...f })); n[fi].yaw = Number(e.target.value); return n; })} />
                         <input type="range" min="-90" max="90" step="1" value={manualFingers[fi].pitch1} title={`Pitch 1 (${pitchAxis})`}
@@ -2388,7 +2528,7 @@ export default function GloveCapture() {
                     <span style={{ fontSize: 11, color: '#a0aec0' }}>Wrist Euler (deg) X Y Z</span>
                     <span style={{ fontSize: 11, color: '#e2b96f' }}>{manualWristEuler.map(v => Math.round(v)).join(' , ')}</span>
                   </div>
-                  <div style={{ display: 'flex',flexDirection:'column', gap: 24 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                     <input type="range" min="-180" max="180" step="1" value={manualWristEuler[0]}
                       onChange={e => { const v = Number(e.target.value); setManualWristEuler(p => { const n = [...p]; n[0] = v; return n; }); }} />
                     <input type="range" min="-180" max="180" step="1" value={manualWristEuler[1]}
