@@ -10,8 +10,8 @@ import toast from "react-hot-toast";
 
 export default function ModelsPage() {
   const router = useRouter();
-  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
-  const codeLink = process.env.CODE_LINK || "https://colab.research.google.com/drive/12pumKVipWAKbLppJ41ji5-ewFlgNYkTx";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001/api';
+  const codeLink = process.env.NEXT_PUBLIC_CODE_LINK || "https://colab.research.google.com/drive/12pumKVipWAKbLppJ41ji5-ewFlgNYkTx";
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [userEmail, setUserEmail] = useState(null);

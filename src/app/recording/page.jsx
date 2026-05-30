@@ -1264,7 +1264,7 @@ export default function GloveCapture() {
   const [userId, setUserId] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
   const [loading, setLoading] = useState(false);
-  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001/api';
   // Calibration ref – set to true to trigger reset inside HandModel
   const calibrateRef = useRef(false);
 

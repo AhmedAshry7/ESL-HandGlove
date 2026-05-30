@@ -10,7 +10,7 @@ import toast from "react-hot-toast";
 
 export default function LanguagesPage() {
   const router = useRouter();
-  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001/api';
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [userEmail, setUserEmail] = useState(null);

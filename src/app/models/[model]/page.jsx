@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabaseClient";
 
 export default function SubmissionsPage() {
   const router = useRouter();
-  const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001/api';
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001/api';
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const modelId = searchParams.get("modelId");
