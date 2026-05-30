@@ -50,7 +50,7 @@ export const BIOMECHANICAL_LIMITS = {
   ring:   { yaw: [-15, 15], mcp: [0, 90], pip: [0, 100] },
   middle: { yaw: [-10, 10], mcp: [0, 90], pip: [0, 100] },
   index:  { yaw: [-20, 20], mcp: [0, 90], pip: [0, 100] },
-  thumb:  { yaw: [-15, 60], mcp: [0, 60], ip:  [0, 80], thumbExtra: [0, 80] }
+  thumb:  { yaw: [-60, 15], mcp: [-50, 50], ip:  [0, 60], thumbExtra: [0, 80] }
 };
 
 function clamp(val, min, max) {
@@ -119,51 +119,65 @@ function getFingerJointLimits(boneName, allLimits) {
     return null;
   }
 
+
+
   return { yawMin, yawMax, pitchMin, pitchMax };
 }
 
-/**
- * Apply biomechanical clamps to a finger bone quaternion.
- * Pitch (X) = curl/extend. Yaw (Y) = spread. Z left alone.
- */
-function clampFingerQuat(quatArray, boneName, allLimits) {
-  const [x, y, z, w] = quatArray;
-  const q = new THREE.Quaternion(x, y, z, w).normalize();
-  const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+function clampFingerEuler(eulerArray, boneName, allLimits) {
+  let [x, y, z] = eulerArray;
 
   const limits = getFingerJointLimits(boneName, allLimits);
   if (limits) {
-    euler.x = clamp(euler.x, limits.pitchMin * DEG2RAD, limits.pitchMax * DEG2RAD);
-    euler.y = clamp(euler.y, limits.yawMin   * DEG2RAD, limits.yawMax   * DEG2RAD);
+    if (boneName.includes("thumb")) {
+      x = clamp(x, limits.yawMin   * DEG2RAD, limits.yawMax   * DEG2RAD);
+      z = clamp(z, limits.pitchMin * DEG2RAD, limits.pitchMax * DEG2RAD);
+    } else {
+      // Non-thumb fingers curl inward on negative X, but limits are positive (0 to 90).
+      // We negate x for clamping against the positive range, then restore the sign.
+      x = -clamp(-x, limits.pitchMin * DEG2RAD, limits.pitchMax * DEG2RAD);
+      z = clamp(z, limits.yawMin   * DEG2RAD, limits.yawMax   * DEG2RAD);
+    }
   }
 
-  const clamped = new THREE.Quaternion().setFromEuler(euler);
-  return [clamped.x, clamped.y, clamped.z, clamped.w];
+  return [x, y, z];
 }
 
-function getSpreadRotation(boneName, isLeft) {
+function getSpreadEuler(boneName, isLeft) {
   const s = isLeft ? -1 : 1;
-  const euler = new THREE.Euler(0, 0, 0, 'XYZ');
+  let x = 0, y = 0, z = 0;
 
   if (boneName.includes("thumb")) {
-    euler.set(0, 0 * s, -0.2 * s);
+    z = -0.2 * s;
   } else if (boneName.includes("index")) {
-    euler.set(0, 0.15 * s, 0);
+    z = 0.15 * s;
   } else if (boneName.includes("middle")) {
-    euler.set(0, 0, 0);
+    z = 0;
   } else if (boneName.includes("ring")) {
-    euler.set(0, -0.15 * s, 0);
+    z = -0.15 * s;
   } else if (boneName.includes("pinky")) {
-    euler.set(0, -0.3 * s, 0);
+    z = -0.3 * s;
   }
 
-  return new THREE.Quaternion().setFromEuler(euler);
+  return [x, y, z];
 }
 
 function applyBoneQuaternion(node, quaternionArray) {
   if (!node || !quaternionArray || quaternionArray.length < 4) return;
   const [x, y, z, w] = quaternionArray;
   node.quaternion.slerp(new THREE.Quaternion(x, y, z, w).normalize(), LERP_SPEED);
+}
+
+function applyBoneEuler(node, eulerArray) {
+  if (!node || !eulerArray || eulerArray.length < 3) return;
+  const [x, y, z] = eulerArray;
+  const targetQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-x, y, z, 'XYZ'));
+  
+  if (LERP_SPEED >= 1) {
+    node.quaternion.copy(targetQ);
+  } else {
+    node.quaternion.slerp(targetQ, LERP_SPEED);
+  }
 }
 
 export function CombinedArmRig({
@@ -210,12 +224,12 @@ export function CombinedArmRig({
       const bone = nodes[name];
       if (!bone) return;
       if (hasRF && rightHandSensorData.fingers[i]) {
-        const fq = fingerLimits
-          ? clampFingerQuat(rightHandSensorData.fingers[i], name, fingerLimits)
+        const fe = fingerLimits
+          ? clampFingerEuler(rightHandSensorData.fingers[i], name, fingerLimits)
           : rightHandSensorData.fingers[i];
-        applyBoneQuaternion(bone, fq);
+        applyBoneEuler(bone, fe);
       } else {
-        bone.quaternion.slerp(getSpreadRotation(name, false), LERP_SPEED);
+        applyBoneEuler(bone, getSpreadEuler(name, false));
       }
     });
 
@@ -238,12 +252,12 @@ export function CombinedArmRig({
       const bone = nodes[name];
       if (!bone) return;
       if (hasLF && leftHandSensorData.fingers[i]) {
-        const fq = fingerLimits
-          ? clampFingerQuat(leftHandSensorData.fingers[i], name, fingerLimits)
+        const fe = fingerLimits
+          ? clampFingerEuler(leftHandSensorData.fingers[i], name, fingerLimits)
           : leftHandSensorData.fingers[i];
-        applyBoneQuaternion(bone, fq);
+        applyBoneEuler(bone, fe);
       } else {
-        bone.quaternion.slerp(getSpreadRotation(name, true), LERP_SPEED);
+        applyBoneEuler(bone, getSpreadEuler(name, true));
       }
     });
   });
