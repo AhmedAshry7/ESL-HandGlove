@@ -261,9 +261,9 @@ function buildFingerEulers(fingers, thumbExtra, calStatus = 0xFF, isLeft = false
   // Unity script New_Magnets.cs mapping:
   // Thumb: X=0, Y=Yaw, Z=Pitch (Positive Z curls inward)
   // Others: X=Pitch, Y=0, Z=Yaw (Negative X curls inward in Three.js right-handed system)
-  const thumbMcpEuler = (f) => [isLeft ? -toRad(f.yaw) : toRad(f.yaw), 0, toRad(f.pitch1)];
-  const thumbPipEuler = (f) => [0, 0, toRad(f.pitch2)];
-  const thumbIpEuler = [0, 0, toRad(thumbExtra)];
+  const thumbMcpEuler = (f) => [toRad(f.yaw), 0, isLeft ? -toRad(f.pitch1) : toRad(f.pitch1)];
+  const thumbPipEuler = (f) => [0, 0, isLeft ? -toRad(f.pitch2) : toRad(f.pitch2)];
+  const thumbIpEuler = [0, 0, isLeft ? -toRad(thumbExtra) : toRad(thumbExtra)];
 
   const fingerMcpEuler = (f) => [-toRad(f.pitch1), 0, isLeft ? -toRad(f.yaw) : toRad(f.yaw)];
   const fingerPipEuler = (f) => [-toRad(f.pitch2), 0, 0];
@@ -1215,7 +1215,7 @@ function CouplingCalibrationUI({
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
 function Scene({ rigData, restRotationR, restRotationL, wristLimits, fingerLimits, onRestPosesLoaded }) {
   return (
-    <Canvas camera={{ position: [0, 0.4, 1.3], fov: 40 }} style={{ width: '100%', height: '100%' }}>
+    <Canvas camera={{ position: [0, 0.4, 1.9], fov: 40 }} style={{ width: '100%', height: '100%' }}>
       <ambientLight intensity={1.8} />
       <directionalLight position={[5, 10, 5]} intensity={2.5} />
       <pointLight position={[-5, 5, -3]} intensity={0.6} />
@@ -1373,7 +1373,20 @@ function RecordingModal({
 export default function GloveCapture() {
   const router = useRouter();
 
-  const ESP_IP = "192.168.1.17";
+  const [espIp, setEspIp] = useState("192.168.1.8");
+  const [ipInput, setIpInput] = useState("192.168.1.8");
+
+  useEffect(() => {
+    const saved = localStorage.getItem('espIp');
+    const defaultIp = saved || process.env.NEXT_PUBLIC_ESP_IP || '192.168.1.8';
+    setEspIp(defaultIp);
+    setIpInput(defaultIp);
+  }, []);
+
+  const handleApplyIp = () => {
+    setEspIp(ipInput);
+    localStorage.setItem('espIp', ipInput);
+  };
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -1448,7 +1461,7 @@ export default function GloveCapture() {
     setRecordedFrames(prev => [...prev, frame]);
   }, []);
 
-  const gloveFrame = useGloveWebSocket(ESP_IP, handleFrame);
+  const gloveFrame = useGloveWebSocket(espIp, handleFrame);
 
   const currentFrame = useMemo(() => {
     if (!gloveFrame?.imuQuat && !gloveFrame?.fingerAnglesFlat) return null;
@@ -1594,16 +1607,61 @@ export default function GloveCapture() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [calibrateMountOffsets, tareHeading]);
 
+  // ─── Manual pose states (Must be before rigFrame) ───
+  const [manualFingersEnable, setManualFingersEnable] = useState(false);
+  const [manualArmsEnable, setManualArmsEnable] = useState(false);
+  const [manualFingers, setManualFingers] = useState(() => (
+    Array.from({ length: 5 }, () => ({ yaw: 0, pitch1: 0, pitch2: 0 }))
+  )); // order: [Pinky, Ring, Middle, Index, Thumb]
+  const [manualThumbExtra, setManualThumbExtra] = useState(0);
+  // Arm joints manual sliders in degrees [X, Y, Z]
+  const [manualRightArm, setManualRightArm] = useState({
+    upperArm: [-3, 0, 2],
+    forearm: [92, -70, -1],
+    hand: [0, 0, 0]
+  });
+  const [manualLeftArm, setManualLeftArm] = useState({
+    upperArm: [1, -5, -4],
+    forearm: [90, 73, 0],
+    hand: [17, 0, 0]
+  });
+
   const rigFrame = useMemo(() => {
-    const rig = buildRigData(currentFrame);
+    const frameData = { ...currentFrame };
+    if (manualFingersEnable) {
+      frameData.fingerAngles = manualFingers;
+      frameData.thumbExtra = manualThumbExtra;
+      frameData.calStatus = CAL_ALL_FINGERS;
+      frameData.leftFingerAngles = manualFingers;
+      frameData.leftThumbExtra = manualThumbExtra;
+      frameData.leftCalStatus = CAL_ALL_FINGERS;
+    }
+
+    const rig = buildRigData(frameData);
     if (!rig) return null;
 
-    if (!isCalibrated) {
-      rig.palm = { forceZeroPose: true };
+    const defaultPalmR = {
+      upperArm: quatFromEuler(...manualRightArm.upperArm.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0))),
+      forearm: quatFromEuler(...manualRightArm.forearm.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0))),
+      hand: quatFromEuler(...manualRightArm.hand.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0)))
+    };
+    const defaultPalmL = {
+      upperArm: quatFromEuler(...manualLeftArm.upperArm.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0))),
+      forearm: quatFromEuler(...manualLeftArm.forearm.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0))),
+      hand: quatFromEuler(...manualLeftArm.hand.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0)))
+    };
+
+    if (manualArmsEnable) {
+      rig.right.palm = defaultPalmR;
+      rig.left.palm = defaultPalmL;
       return rig;
     }
 
-    if (!currentFrame?.imuQuat?.upperArm) return rig;
+    if (!isCalibrated || !currentFrame?.imuQuat?.upperArm) {
+      rig.right.palm = defaultPalmR;
+      rig.left.palm = defaultPalmL;
+      return rig;
+    }
 
     const { upperArm, forearm, hand } = currentFrame.imuQuat;
     const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(upperArm));
@@ -1625,14 +1683,15 @@ export default function GloveCapture() {
 
     const finalUp = tareUpperRef.current.clone().invert().multiply(alUp);
 
-    rig.palm = {
+    rig.right.palm = {
       isAligned: true,
       upperArm: [finalUp.x, finalUp.y, finalUp.z, finalUp.w],
       forearm: [alFo.x, alFo.y, alFo.z, alFo.w],
       hand: [alHa.x, alHa.y, alHa.z, alHa.w]
     };
+    rig.left.palm = defaultPalmL;
     return rig;
-  }, [currentFrame, modelAlign]);
+  }, [currentFrame, modelAlign, isCalibrated, manualFingersEnable, manualArmsEnable, manualFingers, manualThumbExtra, manualRightArm, manualLeftArm]);
 
   const [user, setUser] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -1655,31 +1714,7 @@ export default function GloveCapture() {
   const [restRotationL, setRestRotationL] = useState([-0.99, -3.15, -3.15]);
   const [tunerOpen, setTunerOpen] = useState(true);
 
-  // Manual pose sliders for offline testing (DEV only)
-  const [manualEnable, setManualEnable] = useState(false);
-  const [manualFingers, setManualFingers] = useState(() => (
-    Array.from({ length: 5 }, () => ({ yaw: 0, pitch1: 0, pitch2: 0 }))
-  )); // order: [Pinky, Ring, Middle, Index, Thumb]
-  const [manualThumbExtra, setManualThumbExtra] = useState(0);
-  // Wrist Euler sliders in degrees [X, Y, Z]
-  const [manualWristEuler, setManualWristEuler] = useState([0, 0, 0]);
 
-  // When manual testing enabled, synthesize a frame from manual sliders
-  const rigFrameWithManual = useMemo(() => {
-    //console.log(currentFrame?.fingers)
-    if (!manualEnable) return buildRigData(currentFrame);
-    console.log("Manual mode")
-    // convert wrist Euler degrees to quaternion array [x,y,z,w]
-    const rad = manualWristEuler.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0));
-    const imuQuat = quatFromEuler(rad[0], rad[1], rad[2]);
-    const frame = {
-      fingerAngles: manualFingers,
-      thumbExtra: manualThumbExtra,
-      calStatus: CAL_ALL_FINGERS,
-      imuQuat,
-    };
-    return buildRigData(frame);
-  }, [manualEnable, manualFingers, manualThumbExtra, manualWristEuler, currentFrame]);
 
   // Biomechanical constraint limits
   const [wristLimits, setWristLimits] = useState({ ...DEFAULT_WRIST_LIMITS });
@@ -1706,6 +1741,18 @@ export default function GloveCapture() {
   const [calHand, setCalHand] = useState('right');
   const calHandRef = useRef('right');
   useEffect(() => { calHandRef.current = calHand; }, [calHand]);
+
+  // Load offline arm pose from local storage
+  useEffect(() => {
+    try {
+      const savedRight = localStorage.getItem('esl_glove_offline_right');
+      const savedLeft = localStorage.getItem('esl_glove_offline_left');
+      if (savedRight) setManualRightArm(JSON.parse(savedRight));
+      if (savedLeft) setManualLeftArm(JSON.parse(savedLeft));
+    } catch (e) {
+      console.warn('Could not parse offline arm pose from localStorage');
+    }
+  }, []);
 
   // New: knot sanity warnings
   const [sanityWarnings, setSanityWarnings] = useState([]);
@@ -2333,7 +2380,7 @@ export default function GloveCapture() {
           <div style={s.viewport}>
             <div style={s.viewportLabel}>LIVE PREVIEW</div>
             <Scene
-              rigData={rigFrameWithManual}
+              rigData={rigFrame}
               restRotationR={restRotationR}
               restRotationL={restRotationL}
               wristLimits={wristLimits}
@@ -2679,6 +2726,24 @@ export default function GloveCapture() {
                         </div>
                         <p style={s.calHint}>JSON includes all knots and coupling coefficients. Import sends CMD 0x10 and 0x11 for all axes automatically.</p>
                       </div>
+                      {/* Connection Settings */}
+                      <div style={s.calSection}>
+                        <div style={s.calSectionTitle}>🌐 Connection Settings</div>
+                        <p style={s.calHint}>Set the WebSocket IP address of the Master ESP32.</p>
+                        <div style={s.calRow}>
+                          <label style={s.calLabel}>IP Address</label>
+                          <input
+                            type="text"
+                            style={{ ...s.calInput, flex: 1 }}
+                            value={ipInput}
+                            onChange={e => setIpInput(e.target.value)}
+                            placeholder="e.g. 192.168.1.8"
+                          />
+                          <button style={s.calBtn} onClick={handleApplyIp}>
+                            Connect
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2910,6 +2975,53 @@ export default function GloveCapture() {
                   <span style={{ fontSize: 11, color: '#60a5fa', width: 42, textAlign: 'right' }}>{restRotationL[i].toFixed(2)}</span>
                 </div>
               ))}
+
+              {/* ARMS SECTION (Moved here so it collapses with Rest Pose Tuner) */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#a0aec0' }}>🧪 Manual Arms / Offline Pose</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      localStorage.setItem('esl_glove_offline_right', JSON.stringify(manualRightArm));
+                      localStorage.setItem('esl_glove_offline_left', JSON.stringify(manualLeftArm));
+                      alert('Offline default pose saved to local storage!');
+                    }}
+                    style={{ fontSize: 10, padding: '3px 8px', background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 6, color: '#34d399', cursor: 'pointer' }}
+                  >Save Default</button>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={manualArmsEnable} onChange={e => setManualArmsEnable(e.target.checked)} />
+                  <span style={{ fontSize: 11, color: '#718096' }}>Enable Live Override</span>
+                </label>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  { label: 'Right Arm', state: manualRightArm, setter: setManualRightArm, color: '#e2b96f' },
+                  { label: 'Left Arm', state: manualLeftArm, setter: setManualLeftArm, color: '#60a5fa' }
+                ].map(({ label, state, setter, color }) => (
+                  <div key={label} style={{ marginTop: 4, padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: `1px solid ${color}33` }}>
+                    <div style={{ fontSize: 12, fontWeight: 'bold', color: color, marginBottom: 8 }}>{label}</div>
+                    {['upperArm', 'forearm', 'hand'].map((joint) => (
+                      <div key={joint} style={{ marginBottom: 12 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <span style={{ fontSize: 11, color: '#a0aec0', textTransform: 'capitalize' }}>{joint} Euler (Deg) X Y Z</span>
+                          <span style={{ fontSize: 11, color: color }}>{state[joint].map(v => Math.round(v)).join(' , ')}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                          <input type="range" min="-180" max="180" step="1" value={state[joint][0]} title={`${joint} X`}
+                            onChange={e => { const v = Number(e.target.value); setter(p => ({ ...p, [joint]: [v, p[joint][1], p[joint][2]] })); }} />
+                          <input type="range" min="-180" max="180" step="1" value={state[joint][1]} title={`${joint} Y`}
+                            onChange={e => { const v = Number(e.target.value); setter(p => ({ ...p, [joint]: [p[joint][0], v, p[joint][2]] })); }} />
+                          <input type="range" min="-180" max="180" step="1" value={state[joint][2]} title={`${joint} Z`}
+                            onChange={e => { const v = Number(e.target.value); setter(p => ({ ...p, [joint]: [p[joint][0], p[joint][1], v] })); }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -3014,15 +3126,17 @@ export default function GloveCapture() {
           )}
           {/* ── Manual Pose Tester (DEV only) ── */}
           <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            
+            {/* FINGERS SECTION */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#a0aec0' }}>🧪 Manual Pose</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#a0aec0' }}>🧪 Manual Fingers</span>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={manualEnable} onChange={e => setManualEnable(e.target.checked)} />
-                <span style={{ fontSize: 11, color: '#718096' }}>Enable</span>
+                <input type="checkbox" checked={manualFingersEnable} onChange={e => setManualFingersEnable(e.target.checked)} />
+                <span style={{ fontSize: 11, color: '#718096' }}>Enable Override</span>
               </label>
             </div>
-            {manualEnable && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {manualFingersEnable && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
                 {['Pinky', 'Ring', 'Middle', 'Index', 'Thumb'].map((name, fi) => {
                   const isThumb = name === 'Thumb';
                   const yawAxis = isThumb ? 'Y' : 'Z';
@@ -3052,21 +3166,6 @@ export default function GloveCapture() {
                   </div>
                   <input type="range" min="-90" max="90" step="1" value={manualThumbExtra} title="Thumb IP (Z)"
                     onChange={e => setManualThumbExtra(Number(e.target.value))} />
-                </div>
-
-                <div>
-                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: '#a0aec0' }}>Wrist Euler (deg) X Y Z</span>
-                    <span style={{ fontSize: 11, color: '#e2b96f' }}>{manualWristEuler.map(v => Math.round(v)).join(' , ')}</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                    <input type="range" min="-180" max="180" step="1" value={manualWristEuler[0]}
-                      onChange={e => { const v = Number(e.target.value); setManualWristEuler(p => { const n = [...p]; n[0] = v; return n; }); }} />
-                    <input type="range" min="-180" max="180" step="1" value={manualWristEuler[1]}
-                      onChange={e => { const v = Number(e.target.value); setManualWristEuler(p => { const n = [...p]; n[1] = v; return n; }); }} />
-                    <input type="range" min="-180" max="180" step="1" value={manualWristEuler[2]}
-                      onChange={e => { const v = Number(e.target.value); setManualWristEuler(p => { const n = [...p]; n[2] = v; return n; }); }} />
-                  </div>
                 </div>
               </div>
             )}
