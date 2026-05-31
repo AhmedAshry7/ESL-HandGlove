@@ -71,7 +71,8 @@ const CALIBRATION_STEPS = [
 
 const CAL_FINGER_NAMES = ['Pinky', 'Ring', 'Middle', 'Index', 'Thumb'];
 const CAL_AXIS_NAMES = ['Yaw', 'Pitch 1', 'Pitch 2', 'Thumb IP'];
-const COUPLING_LABELS = ['p2→p1', 'yaw→p1', 'yaw→p2', 'p1→p2'];
+const COUPLING_LABELS_STANDARD = ['p2→p1', 'yaw→p1', 'yaw→p2', 'p1→p2'];
+const COUPLING_LABELS_THUMB = ['p2→p1', 'yaw→p1', 'yaw→p2', 'p1→p2', 'ip→p1', 'yaw→ip'];
 
 // ch0-15 → finger/axis label (from firmware config.h FINGER_DEFAULTS)
 const CH_LABELS = [
@@ -146,10 +147,11 @@ function buildKnotsPayload(fingerIdx, axisIdx, knots) {
 }
 
 function buildCouplingPayload(fingerIdx, coeffs) {
-  const buf = new ArrayBuffer(1 + (4 * 4));
+  const len = coeffs.length;
+  const buf = new ArrayBuffer(1 + (len * 4));
   const view = new DataView(buf);
   view.setUint8(0, fingerIdx);
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < len; i += 1) {
     view.setFloat32(1 + (i * 4), coeffs[i] ?? 0, true);
   }
   return new Uint8Array(buf);
@@ -853,7 +855,7 @@ function CouplingCalibrationUI({
     setBaselines(null);
   }, [couplingFinger]);
 
-  const [chYaw, chP1, chP2] = CAL_FINGER_DEFAULTS[couplingFinger];
+  const [chYaw, chP1, chP2, chIP] = CAL_FINGER_DEFAULTS[couplingFinger];
 
   const captureBaseline = async () => {
     if (chP1 === -1 || chP2 === -1) { setCalError('Sensors not available'); return; }
@@ -863,7 +865,8 @@ function CouplingCalibrationUI({
       setBaselines({
         yaw: medians[chYaw] ?? 0,
         p1: medians[chP1],
-        p2: medians[chP2]
+        p2: medians[chP2],
+        ip: chIP !== -1 ? medians[chIP] : 0
       });
       setStep('pose1');
     } catch (e) {
@@ -877,9 +880,9 @@ function CouplingCalibrationUI({
     setIsCapturing(true);
     try {
       const medians = await takeMedianSamples(800);
-      const vYaw = medians[chYaw] ?? 0;
       const vP1 = medians[chP1];
       const vP2 = medians[chP2];
+      const vIP = chIP !== -1 ? medians[chIP] : 0;
 
       setCouplingByFinger(prev => {
         const next = prev.map(f => [...f]);
@@ -891,9 +894,17 @@ function CouplingCalibrationUI({
         } else if (poseName === 'pose2') {
           coeffs[1] = vP1 - baselines.p1;
           coeffs[2] = vP2 - baselines.p2;
+          if (chIP !== -1) coeffs[5] = vIP - baselines.ip;
           setStep('pose3');
         } else if (poseName === 'pose3') {
           coeffs[3] = vP2 - baselines.p2;
+          if (chIP !== -1) {
+            setStep('pose4');
+          } else {
+            setStep('done');
+          }
+        } else if (poseName === 'pose4') {
+          coeffs[4] = vP1 - baselines.p1;
           setStep('done');
         }
         return next;
@@ -961,6 +972,14 @@ function CouplingCalibrationUI({
             </button>
           </div>
         )}
+        {step === 'pose4' && (
+          <div>
+            <p style={{ fontSize: 11, color: '#a0aec0', marginTop: 0 }}>Step 5 (Thumb Only): <b>Bend ONLY the IP Joint</b> fully. Keep Yaw, P1, and P2 relaxed.</p>
+            <button onClick={() => capturePose('pose4')} disabled={isCapturing} style={{ padding: '6px 12px', borderRadius: 6, background: '#60a5fa', color: '#000', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 'bold' }}>
+              {isCapturing ? 'Capturing...' : 'Capture Pose 4'}
+            </button>
+          </div>
+        )}
         {step === 'done' && (
           <div>
             <p style={{ fontSize: 11, color: '#34d399', marginTop: 0 }}>Capture complete! Review coefficients below and click Apply.</p>
@@ -972,7 +991,7 @@ function CouplingCalibrationUI({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-        {COUPLING_LABELS.map((lbl, i) => (
+        {(couplingFinger === 4 ? COUPLING_LABELS_THUMB : COUPLING_LABELS_STANDARD).map((lbl, i) => (
           <div key={lbl}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
               <span style={{ fontSize: 11, color: '#a0aec0' }}>{lbl}</span>
@@ -1312,6 +1331,10 @@ export default function GloveCapture() {
 
   const [calibrationOpen, setCalibrationOpen] = useState(false);
   const [calError, setCalError] = useState(null);
+  const [couplingByFinger, setCouplingByFinger] = useState(() =>
+    Array.from({ length: 5 }, (_, fi) => fi === 4 ? [0, 0, 0, 0, 0, 0] : [0, 0, 0, 0])
+  );
+  const [couplingInput, setCouplingInput] = useState('0,0,0,0');
   const [rawVoltages, setRawVoltages] = useState(() => Array(16).fill(null));
   const [sampleCount, setSampleCount] = useState(DEFAULT_SAMPLE_COUNT);
   const [sampleDelayMs, setSampleDelayMs] = useState(DEFAULT_SAMPLE_DELAY_MS);
@@ -1326,11 +1349,6 @@ export default function GloveCapture() {
   const calHandRef = useRef('right');
   useEffect(() => { calHandRef.current = calHand; }, [calHand]);
 
-  // New: coupling sliders (5 fingers × 6 coefficients)
-  const [couplingByFinger, setCouplingByFinger] = useState(() =>
-    Array.from({ length: 5 }, () => [0, 0, 0, 0, 0, 0])
-  );
-  const [couplingInput, setCouplingInput] = useState('0,0,0,0');
   // New: knot sanity warnings
   const [sanityWarnings, setSanityWarnings] = useState([]);
   // New: NVS load banner
@@ -1403,7 +1421,8 @@ export default function GloveCapture() {
         medians[ch] = null;
       } else {
         const mid = Math.floor(chValues.length / 2);
-        medians[ch] = chValues.length % 2 !== 0 ? chValues[mid] : (chValues[mid - 1] + chValues[mid]) / 2;
+        const midVal = chValues.length % 2 !== 0 ? chValues[mid] : (chValues[mid - 1] + chValues[mid]) / 2;
+        medians[ch] = midVal;
       }
     }
     return medians;
@@ -1525,10 +1544,11 @@ export default function GloveCapture() {
   // Legacy text-input coupling send (kept for DEV backward compat)
   const sendCoupling = useCallback(async () => {
     const parts = couplingInput.split(',').map(val => parseFloat(val.trim())).filter(val => Number.isFinite(val));
-    if (parts.length < 4) { setCalError('Provide 4 comma-separated coupling values.'); return; }
+    const expectedLen = calFinger === 4 ? 6 : 4;
+    if (parts.length < expectedLen) { setCalError(`Provide ${expectedLen} comma-separated coupling values.`); return; }
     try {
       setCalError(null);
-      const payload = buildCouplingPayload(calFinger, parts.slice(0, 4));
+      const payload = buildCouplingPayload(calFinger, parts.slice(0, expectedLen));
       await sendCommandUnified(CMD.SET_COUPLING, payload);
     } catch (err) {
       setCalError(err?.message || 'Failed to send coupling');
@@ -1578,7 +1598,7 @@ export default function GloveCapture() {
           return Array.isArray(k) ? k.map(v => (typeof v === 'number' ? v : null)) : Array(5).fill(null);
         })
       );
-      const newCoupling = Array.from({ length: 5 }, (_, fi) => cal.fingers[fi]?.coupling ?? [0, 0, 0, 0]);
+      const newCoupling = Array.from({ length: 5 }, (_, fi) => cal.fingers[fi]?.coupling ?? (fi === 4 ? [0, 0, 0, 0, 0, 0] : [0, 0, 0, 0]));
       setKnotsByAxis(newKnots);
       setCouplingByFinger(newCoupling);
       // Send to device
