@@ -235,11 +235,11 @@ export function CombinedArmRig({
   const { nodes } = useGraph(clone);
   
   // Robustly find the correct main bones (ignoring twist bones like .001)
-  useEffect(() => {
+/*   useEffect(() => {
     if (rightHandSensorData?.palm) {
        console.log("ArmModel recv data, isAligned:", rightHandSensorData.palm.isAligned, "forceZero:", rightHandSensorData.palm.forceZeroPose);
     }
-  }, [rightHandSensorData?.palm]);
+  }, [rightHandSensorData?.palm]); */
 
   const armBones = useMemo(() => {
     if (!nodes) return {};
@@ -257,14 +257,14 @@ export function CombinedArmRig({
       lForearm: all.find(n => n.name.toLowerCase().includes('forearm') && isL(n) && isMain(n)),
       lHand: all.find(n => n.name.toLowerCase().includes('hand') && !n.name.toLowerCase().includes('prop') && isL(n)),
     };
-    console.log("ArmModel extracted bones:", {
+    /* console.log("ArmModel extracted bones:", {
       rUpper: bones.rUpper?.name + " (isBone: " + bones.rUpper?.isBone + ")",
       rForearm: bones.rForearm?.name + " (isBone: " + bones.rForearm?.isBone + ")",
       rHand: bones.rHand?.name + " (isBone: " + bones.rHand?.isBone + ")"
     });
     console.log("Available upper nodes:", Object.keys(nodes).filter(k => k.toLowerCase().includes("upper")));
     console.log("Direct lookup:", !!nodes['B-upperArm.R']);
-    return bones;
+     */return bones;
   }, [nodes]);
 
   const axesHelpersRef = useRef([]);
