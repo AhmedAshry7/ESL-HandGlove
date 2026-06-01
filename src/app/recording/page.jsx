@@ -34,6 +34,7 @@ const FINGER_LABELS = [
 ];
 
 const IMU_PACKET_HEADER = 0xAABBCCDD;
+const DUAL_IMU_HEADER = 0xAABBCCDE;
 const FINGER_PACKET_HEADER = 0xF1F2F3F4;
 const DUAL_FINGER_PACKET_HEADER = 0xF1F2F3F5;
 const RAW_VOLTAGES_PACKET_HEADER = 0xC0DEC0DE;
@@ -329,7 +330,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
     imuTimestamp: null,
     fingerTimestamp: null,
     imuDiag: null,
-    consoleLogs: [],
+    consoleLogs: { right: [], left: [] },
     imuPoseIdx: 0,
   });
   const imuQuatRef = useRef(null);
@@ -367,14 +368,18 @@ function useGloveWebSocket(ipAddress, onFrame) {
         if (typeof event.data === 'string') {
           const logMsg = event.data;
           setGloveState(prev => {
-            const newLogs = [...prev.consoleLogs, logMsg].slice(-50); // Keep last 50 logs
+            const isLeft = logMsg.includes("[LEFT]");
+            const target = isLeft ? 'left' : 'right';
+            const currentLogs = prev.consoleLogs || { right: [], left: [] };
+            const newLogs = { ...currentLogs };
+            newLogs[target] = [...(currentLogs[target] || []), logMsg].slice(-50); // Keep last 50 logs per hand
 
             let newPoseIdx = prev.imuPoseIdx;
             const match = logMsg.match(/Recorded Pose (\d+)\/6 successfully/);
-            if (match) {
+            if (match && !isLeft) {
               newPoseIdx = parseInt(match[1], 10);
             }
-            if (logMsg.includes("Static 6-poses calibration initialized") || logMsg.includes("Restarting calibration")) {
+            if (!isLeft && (logMsg.includes("Static 6-poses calibration initialized") || logMsg.includes("Restarting calibration"))) {
               newPoseIdx = 0;
             }
 
@@ -419,49 +424,8 @@ function useGloveWebSocket(ipAddress, onFrame) {
           if (view.byteLength < 24) return;
           const timestamp = view.getUint32(4, true);
 
-          // Firmware sends [w, x, y, z] — map to Three.js [x, y, z, w]
-          let imuQuat;
-          if (view.byteLength >= 56) {
-            // New 3-IMU format
-            const u_qw = view.getFloat32(8, true);
-            const u_qx = view.getFloat32(12, true);
-            const u_qy = view.getFloat32(16, true);
-            const u_qz = view.getFloat32(20, true);
-
-            const f_qw = view.getFloat32(24, true);
-            const f_qx = view.getFloat32(28, true);
-            const f_qy = view.getFloat32(32, true);
-            const f_qz = view.getFloat32(36, true);
-
-            const h_qw = view.getFloat32(40, true);
-            const h_qx = view.getFloat32(44, true);
-            const h_qy = view.getFloat32(48, true);
-            const h_qz = view.getFloat32(52, true);
-
-            const qU = new THREE.Quaternion(u_qx, u_qy, u_qz, u_qw).normalize();
-            const qF = new THREE.Quaternion(f_qx, f_qy, f_qz, f_qw).normalize();
-            const qH = new THREE.Quaternion(h_qx, h_qy, h_qz, h_qw).normalize();
-
-            // NaN safety check to prevent 3D model from stretching if filter diverges
-            if (isNaN(qU.x) || isNaN(qF.x) || isNaN(qH.x)) return;
-
-            imuQuat = {
-              upperArm: [qU.x, qU.y, qU.z, qU.w],
-              forearm: [qF.x, qF.y, qF.z, qF.w],
-              hand: [qH.x, qH.y, qH.z, qH.w]
-            };
-          } else {
-            // Old 1-IMU format (Hand only)
-            const qw = view.getFloat32(8, true);
-            const qx = view.getFloat32(12, true);
-            const qy = view.getFloat32(16, true);
-            const qz = view.getFloat32(20, true);
-
-            const qH = new THREE.Quaternion(qx, qy, qz, qw).normalize();
-            imuQuat = { hand: [qH.x, qH.y, qH.z, qH.w] };
-          }
-          imuQuatRef.current = imuQuat;
-
+          // We NO LONGER extract quaternions from this packet since DualIMUPacket handles it.
+          // This prevents overwriting the valid quaternions with 0s if pkt is unpopulated.
           // ── Diagnostic fields ──────────
           let imuDiag = null;
           if (view.byteLength >= 136) {
@@ -500,7 +464,6 @@ function useGloveWebSocket(ipAddress, onFrame) {
 
           setGloveState(prev => ({
             ...prev,
-            imuQuat,
             imuTimestamp: timestamp,
             ...(imuDiag ? { imuDiag } : {}),
           }));
@@ -510,10 +473,69 @@ function useGloveWebSocket(ipAddress, onFrame) {
               source: 'imu',
               fingers: fingerAnglesFlatRef.current,
               fingerAngles: fingerAnglesRef.current,
-              imuQuat,
               imuDiag,
               flex: {},
               pads: [],
+            });
+          }
+          return;
+        }
+
+        if (header === DUAL_IMU_HEADER) {
+          if (view.byteLength < 111) return;
+          const timestamp = view.getUint32(4, true);
+
+          // Right Hand (Master)
+          const rU_qw = view.getFloat32(8, true); const rU_qx = view.getFloat32(12, true); const rU_qy = view.getFloat32(16, true); const rU_qz = view.getFloat32(20, true);
+          const rF_qw = view.getFloat32(24, true); const rF_qx = view.getFloat32(28, true); const rF_qy = view.getFloat32(32, true); const rF_qz = view.getFloat32(36, true);
+          const rH_qw = view.getFloat32(40, true); const rH_qx = view.getFloat32(44, true); const rH_qy = view.getFloat32(48, true); const rH_qz = view.getFloat32(52, true);
+          const rqU = new THREE.Quaternion(rU_qx, rU_qy, rU_qz, rU_qw).normalize();
+          const rqF = new THREE.Quaternion(rF_qx, rF_qy, rF_qz, rF_qw).normalize();
+          const rqH = new THREE.Quaternion(rH_qx, rH_qy, rH_qz, rH_qw).normalize();
+          const rightImuStatus = [view.getUint8(56), view.getUint8(57), view.getUint8(58)];
+
+          let imuQuat;
+          if (!isNaN(rqU.x) && !isNaN(rqF.x) && !isNaN(rqH.x)) {
+            imuQuat = {
+              upperArm: [rqU.x, rqU.y, rqU.z, rqU.w],
+              forearm: [rqF.x, rqF.y, rqF.z, rqF.w],
+              hand: [rqH.x, rqH.y, rqH.z, rqH.w]
+            };
+            imuQuatRef.current = imuQuat;
+          }
+
+          // Left Hand (Slave)
+          const lU_qw = view.getFloat32(59, true); const lU_qx = view.getFloat32(63, true); const lU_qy = view.getFloat32(67, true); const lU_qz = view.getFloat32(71, true);
+          const lF_qw = view.getFloat32(75, true); const lF_qx = view.getFloat32(79, true); const lF_qy = view.getFloat32(83, true); const lF_qz = view.getFloat32(87, true);
+          const lH_qw = view.getFloat32(91, true); const lH_qx = view.getFloat32(95, true); const lH_qy = view.getFloat32(99, true); const lH_qz = view.getFloat32(103, true);
+          const lqU = new THREE.Quaternion(lU_qx, lU_qy, lU_qz, lU_qw).normalize();
+          const lqF = new THREE.Quaternion(lF_qx, lF_qy, lF_qz, lF_qw).normalize();
+          const lqH = new THREE.Quaternion(lH_qx, lH_qy, lH_qz, lH_qw).normalize();
+          const leftImuStatus = [view.getUint8(107), view.getUint8(108), view.getUint8(109)];
+          const leftConnected = view.getUint8(110) === 1;
+
+          let leftImuQuat;
+          if (leftConnected && !isNaN(lqU.x) && !isNaN(lqF.x) && !isNaN(lqH.x)) {
+            leftImuQuat = {
+              upperArm: [lqU.x, lqU.y, lqU.z, lqU.w],
+              forearm: [lqF.x, lqF.y, lqF.z, lqF.w],
+              hand: [lqH.x, lqH.y, lqH.z, lqH.w]
+            };
+          }
+
+          setGloveState(prev => ({
+            ...prev,
+            imuQuat,
+            leftImuQuat,
+            imuTimestamp: timestamp,
+            dualImuStatus: { right: rightImuStatus, left: leftImuStatus, leftConnected }
+          }));
+
+          if (onFrame) {
+            onFrame({
+              source: 'dual_imu',
+              imuQuat,
+              leftImuQuat,
             });
           }
           return;
@@ -802,8 +824,8 @@ function FingerAnglesPanel({ frame, calStatus = 0 }) {
 }
 
 // ─── IMU Diagnostics HUD ──────────────────────────────────────────────────────
-function IMUDiagnosticsPanel({ diag, imuQuat }) {
-  if (!diag && !imuQuat) return null;
+function IMUDiagnosticsPanel({ diag, imuQuat, leftImuQuat, dualImuStatus }) {
+  if (!diag && !imuQuat && !leftImuQuat) return null;
 
   const magPct = diag ? Math.round((diag.magStability ?? 0) * 100) : null;
   const drift = diag ? (diag.driftExposure ?? 0).toFixed(1) : null;
@@ -821,7 +843,7 @@ function IMUDiagnosticsPanel({ diag, imuQuat }) {
     wrap: { background: 'rgba(10,12,28,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, overflow: 'hidden', backdropFilter: 'blur(12px)' },
     header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)' },
     title: { fontSize: 12, fontWeight: 600, color: '#a0aec0', letterSpacing: '0.8px', textTransform: 'uppercase' },
-    badge: { fontSize: 10, padding: '2px 8px', borderRadius: 100, background: imuQuat ? 'rgba(52,211,153,0.12)' : 'rgba(74,85,104,0.3)', color: imuQuat ? '#34d399' : '#4a5568', border: `1px solid ${imuQuat ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.06)'}` },
+    badge: { fontSize: 10, padding: '2px 8px', borderRadius: 100, background: (imuQuat || leftImuQuat) ? 'rgba(52,211,153,0.12)' : 'rgba(74,85,104,0.3)', color: (imuQuat || leftImuQuat) ? '#34d399' : '#4a5568', border: `1px solid ${(imuQuat || leftImuQuat) ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.06)'}` },
     body: { padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
     row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
     key: { fontSize: 11, color: '#718096' },
@@ -829,13 +851,24 @@ function IMUDiagnosticsPanel({ diag, imuQuat }) {
     barBg: { flex: 1, height: 4, background: '#1a1f35', borderRadius: 4, overflow: 'hidden', margin: '0 10px' },
     barFill: (pct, color) => ({ width: `${pct}%`, height: '100%', borderRadius: 4, background: color, transition: 'width 0.5s' }),
     pill: (on) => ({ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: on ? 'rgba(96,165,250,0.12)' : 'rgba(74,85,104,0.2)', color: on ? '#60a5fa' : '#4a5568', border: `1px solid ${on ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.06)'}` }),
+    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, padding: 14 },
+    card: { background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' },
+    cardTitle: { fontSize: 12, fontWeight: 600, color: '#e2b96f', marginBottom: 8, display: 'flex', justifyContent: 'space-between' },
   };
 
-  const imus = [
-    { key: 'upperArm', label: 'Upper Arm IMU', data: imuQuat?.upperArm, diag: diag?.perImu?.upperArm },
-    { key: 'forearm', label: 'Forearm IMU', data: imuQuat?.forearm, diag: diag?.perImu?.forearm },
-    { key: 'hand', label: 'Hand IMU', data: imuQuat?.hand || imuQuat, diag: diag?.perImu?.hand }
+  const rightImus = [
+    { key: 'r_upperArm', label: 'R Upper Arm IMU', data: imuQuat?.upperArm, diag: diag?.perImu?.upperArm, magActive: dualImuStatus?.right?.[0] === 1 },
+    { key: 'r_forearm', label: 'R Forearm IMU', data: imuQuat?.forearm, diag: diag?.perImu?.forearm, magActive: dualImuStatus?.right?.[1] === 1 },
+    { key: 'r_hand', label: 'R Hand IMU', data: imuQuat?.hand || imuQuat, diag: diag?.perImu?.hand, magActive: dualImuStatus?.right?.[2] === 1 }
   ];
+
+  const leftImus = [
+    { key: 'l_upperArm', label: 'L Upper Arm IMU', data: leftImuQuat?.upperArm, diag: null, magActive: dualImuStatus?.left?.[0] === 1 },
+    { key: 'l_forearm', label: 'L Forearm IMU', data: leftImuQuat?.forearm, diag: null, magActive: dualImuStatus?.left?.[1] === 1 },
+    { key: 'l_hand', label: 'L Hand IMU', data: leftImuQuat?.hand || leftImuQuat, diag: null, magActive: dualImuStatus?.left?.[2] === 1 }
+  ];
+
+  const imus = [...rightImus, ...(leftImuQuat || dualImuStatus?.leftConnected ? leftImus : [])];
 
   const STATE_LABELS = ['IDLE', 'BOOT CAL', 'STATIC ALIGN WAIT', 'STATIC ALIGN RECORDING', 'RUNNING', 'MAG CAL'];
 
@@ -843,7 +876,7 @@ function IMUDiagnosticsPanel({ diag, imuQuat }) {
     <div style={d.wrap}>
       <div style={d.header}>
         <span style={d.title}>📡 IMU Diagnostics & Telemetry</span>
-        <span style={d.badge}>{imuQuat ? 'LIVE' : 'NO SIGNAL'}</span>
+        <span style={d.badge}>{(imuQuat || leftImuQuat) ? 'LIVE' : 'NO SIGNAL'}</span>
       </div>
 
       <div style={d.grid}>
@@ -853,7 +886,7 @@ function IMUDiagnosticsPanel({ diag, imuQuat }) {
             <div key={imu.key} style={d.card}>
               <div style={d.cardTitle}>
                 <span>{imu.label}</span>
-                <span style={{ color: '#34d399', fontSize: 10 }}>● Active</span>
+                <span style={{ color: imu.magActive ? '#34d399' : '#a0aec0', fontSize: 10 }}>● {imu.magActive ? 'Mag Active' : 'Mag Off'}</span>
               </div>
 
               {imu.diag ? (
@@ -1477,30 +1510,45 @@ export default function GloveCapture() {
       leftCalStatus: gloveFrame.leftCalStatus ?? 0,
 
       imuQuat: gloveFrame.imuQuat,
+      leftImuQuat: gloveFrame.leftImuQuat,
+      dualImuStatus: gloveFrame.dualImuStatus,
       imuDiag: gloveFrame.imuDiag ?? null,
       flex: {},
       pads: [],
     };
   }, [gloveFrame]);
 
-  const [modelAlign, setModelAlign] = useState({
+  const [modelAlignRight, setModelAlignRight] = useState({
+    upper: [0, 0, 0],
+    forearm: [0, 0, 0],
+    hand: [0, 0, 0]
+  });
+  const [modelAlignLeft, setModelAlignLeft] = useState({
     upper: [0, 0, 0],
     forearm: [0, 0, 0],
     hand: [0, 0, 0]
   });
 
   const mountCorrRef = useRef({
-    upper: new THREE.Quaternion(),
-    forearmL: new THREE.Quaternion(),
-    forearmR: new THREE.Quaternion(),
-    handL: new THREE.Quaternion(),
-    handR: new THREE.Quaternion()
+    upperR: new THREE.Quaternion(),
+    forearmR1: new THREE.Quaternion(),
+    forearmR2: new THREE.Quaternion(),
+    handR1: new THREE.Quaternion(),
+    handR2: new THREE.Quaternion(),
+    upperL: new THREE.Quaternion(),
+    forearmL1: new THREE.Quaternion(),
+    forearmL2: new THREE.Quaternion(),
+    handL1: new THREE.Quaternion(),
+    handL2: new THREE.Quaternion()
   });
 
   const restPosesRef = useRef(null);
-  const tareUpperRef = useRef(new THREE.Quaternion());
-  const modelAlignRef = useRef(modelAlign);
-  useEffect(() => { modelAlignRef.current = modelAlign; }, [modelAlign]);
+  const tareUpperRRef = useRef(new THREE.Quaternion());
+  const tareUpperLRef = useRef(new THREE.Quaternion());
+  const modelAlignRightRef = useRef(modelAlignRight);
+  const modelAlignLeftRef = useRef(modelAlignLeft);
+  useEffect(() => { modelAlignRightRef.current = modelAlignRight; }, [modelAlignRight]);
+  useEffect(() => { modelAlignLeftRef.current = modelAlignLeft; }, [modelAlignLeft]);
 
   const currentFrameRef = useRef(currentFrame);
   useEffect(() => { currentFrameRef.current = currentFrame; }, [currentFrame]);
@@ -1509,46 +1557,48 @@ export default function GloveCapture() {
 
   const calibrateMountOffsets = useCallback(() => {
     const frame = currentFrameRef.current;
-    if (!frame?.imuQuat?.upperArm || !restPosesRef.current || !restPosesRef.current.right) {
-      console.warn("Cannot calibrate: missing IMU data or rest poses");
+    const isLeft = calHandRef.current === 'left';
+    
+    const imuQuat = isLeft ? frame?.leftImuQuat : frame?.imuQuat;
+    const restPosesObj = isLeft ? restPosesRef.current?.left : restPosesRef.current?.right;
+
+    if (!imuQuat?.upperArm || !restPosesObj) {
+      console.warn("Cannot calibrate: missing IMU data or rest poses for " + calHandRef.current);
       return;
     }
-    const { upperArm, forearm, hand } = frame.imuQuat;
+    const { upperArm, forearm, hand } = imuQuat;
 
     const hwUpperWorld = ConvertToThreeSpace(new THREE.Quaternion().fromArray(upperArm));
     const hwForearmLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(forearm));
     const hwHandLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(hand));
 
+    const mAlign = isLeft ? modelAlignLeftRef.current : modelAlignRightRef.current;
     const mAlignUp = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-      (parseFloat(modelAlignRef.current.upper[0]) || 0) * DEG2RAD,
-      (parseFloat(modelAlignRef.current.upper[1]) || 0) * DEG2RAD,
-      (parseFloat(modelAlignRef.current.upper[2]) || 0) * DEG2RAD, 'XYZ'));
+      (parseFloat(mAlign.upper[0]) || 0) * DEG2RAD,
+      (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD,
+      (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
     const mAlignFo = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-      (parseFloat(modelAlignRef.current.forearm[0]) || 0) * DEG2RAD,
-      (parseFloat(modelAlignRef.current.forearm[1]) || 0) * DEG2RAD,
-      (parseFloat(modelAlignRef.current.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
+      (parseFloat(mAlign.forearm[0]) || 0) * DEG2RAD,
+      (parseFloat(mAlign.forearm[1]) || 0) * DEG2RAD,
+      (parseFloat(mAlign.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
     const mAlignHa = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-      (parseFloat(modelAlignRef.current.hand[0]) || 0) * DEG2RAD,
-      (parseFloat(modelAlignRef.current.hand[1]) || 0) * DEG2RAD,
-      (parseFloat(modelAlignRef.current.hand[2]) || 0) * DEG2RAD, 'XYZ'));
+      (parseFloat(mAlign.hand[0]) || 0) * DEG2RAD,
+      (parseFloat(mAlign.hand[1]) || 0) * DEG2RAD,
+      (parseFloat(mAlign.hand[2]) || 0) * DEG2RAD, 'XYZ'));
 
-    const { upper: upperRestPose, forearm: forearmRestPose, hand: handRestPose } = restPosesRef.current.right;
+    const { upper: upperRestPose, forearm: forearmRestPose, hand: handRestPose } = restPosesObj;
 
     // 1. Upper Arm
     const alignedUpper_old = hwUpperWorld.clone().multiply(mAlignUp);
     const delta = alignedUpper_old.clone().multiply(upperRestPose.clone().invert());
-
     const deltaEuler = new THREE.Euler().setFromQuaternion(delta, 'YXZ');
     const headingYaw = deltaEuler.y;
-
     const qHeading = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, headingYaw, 0, 'XYZ'));
     const Q_bone_ideal = qHeading.clone().multiply(upperRestPose);
-
     const upperMountCorr = hwUpperWorld.clone().invert().multiply(Q_bone_ideal).multiply(mAlignUp.clone().invert());
 
     // 2. Forearm
     const forearmMountL = upperMountCorr.clone().invert();
-
     const forearmMountR = hwForearmLocal.clone().invert()
       .multiply(upperMountCorr).multiply(mAlignUp)
       .multiply(forearmRestPose)
@@ -1556,41 +1606,51 @@ export default function GloveCapture() {
 
     // 3. Hand
     const handMountL = forearmMountR.clone().invert();
-
     const handMountR = hwHandLocal.clone().invert()
       .multiply(forearmMountR).multiply(mAlignFo)
       .multiply(handRestPose)
       .multiply(mAlignHa.clone().invert());
 
-    mountCorrRef.current = {
-      upper: upperMountCorr,
-      forearmL: forearmMountL,
-      forearmR: forearmMountR,
-      handL: handMountL,
-      handR: handMountR
-    };
+    if (isLeft) {
+      mountCorrRef.current.upperL = upperMountCorr;
+      mountCorrRef.current.forearmL1 = forearmMountL;
+      mountCorrRef.current.forearmL2 = forearmMountR;
+      mountCorrRef.current.handL1 = handMountL;
+      mountCorrRef.current.handL2 = handMountR;
+    } else {
+      mountCorrRef.current.upperR = upperMountCorr;
+      mountCorrRef.current.forearmR1 = forearmMountL;
+      mountCorrRef.current.forearmR2 = forearmMountR;
+      mountCorrRef.current.handR1 = handMountL;
+      mountCorrRef.current.handR2 = handMountR;
+    }
 
     // Auto-tare heading after calibration
     const calAlignedUpper = hwUpperWorld.clone().multiply(upperMountCorr).multiply(mAlignUp);
     const calAlignedEuler = new THREE.Euler().setFromQuaternion(calAlignedUpper, 'YXZ');
-    tareUpperRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, calAlignedEuler.y, 0, 'XYZ'));
+    const tareQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, calAlignedEuler.y, 0, 'XYZ'));
+    if (isLeft) tareUpperLRef.current = tareQ; else tareUpperRRef.current = tareQ;
 
     setIsCalibrated(true);
-    console.log("Mount calibration complete!");
+    console.log("Mount calibration complete for", calHandRef.current);
   }, []);
 
   const tareHeading = useCallback(() => {
     const frame = currentFrameRef.current;
-    if (!frame?.imuQuat?.upperArm) return;
+    const isLeft = calHandRef.current === 'left';
+    const imuQuat = isLeft ? frame?.leftImuQuat : frame?.imuQuat;
+    if (!imuQuat?.upperArm) return;
 
-    const { upperArm } = frame.imuQuat;
-    const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(upperArm));
-    const mUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(modelAlignRef.current.upper[0]) || 0) * DEG2RAD, (parseFloat(modelAlignRef.current.upper[1]) || 0) * DEG2RAD, (parseFloat(modelAlignRef.current.upper[2]) || 0) * DEG2RAD, 'XYZ'));
+    const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm));
+    const mAlign = isLeft ? modelAlignLeftRef.current : modelAlignRightRef.current;
+    const mUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
 
-    const alUp = hwUp.clone().multiply(mountCorrRef.current.upper).multiply(mUp);
+    const upperMountCorr = isLeft ? mountCorrRef.current.upperL : mountCorrRef.current.upperR;
+    const alUp = hwUp.clone().multiply(upperMountCorr).multiply(mUp);
     const euler = new THREE.Euler().setFromQuaternion(alUp, 'YXZ');
-    tareUpperRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0, 'XYZ'));
-    console.log("Heading tared.");
+    const tareQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0, 'XYZ'));
+    if (isLeft) tareUpperLRef.current = tareQ; else tareUpperRRef.current = tareQ;
+    console.log("Heading tared for", calHandRef.current);
   }, []);
 
   useEffect(() => {
@@ -1657,41 +1717,49 @@ export default function GloveCapture() {
       return rig;
     }
 
-    if (!isCalibrated || !currentFrame?.imuQuat?.upperArm) {
+    if (!currentFrame?.imuQuat?.upperArm) {
       rig.right.palm = defaultPalmR;
       rig.left.palm = defaultPalmL;
       return rig;
     }
 
-    const { upperArm, forearm, hand } = currentFrame.imuQuat;
-    const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(upperArm));
-    const hwFo = ConvertToThreeSpace(new THREE.Quaternion().fromArray(forearm));
-    const hwHa = ConvertToThreeSpace(new THREE.Quaternion().fromArray(hand));
-
-    const mUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(modelAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(modelAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(modelAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
-    const mFo = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(modelAlign.forearm[0]) || 0) * DEG2RAD, (parseFloat(modelAlign.forearm[1]) || 0) * DEG2RAD, (parseFloat(modelAlign.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
-    const mHa = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(modelAlign.hand[0]) || 0) * DEG2RAD, (parseFloat(modelAlign.hand[1]) || 0) * DEG2RAD, (parseFloat(modelAlign.hand[2]) || 0) * DEG2RAD, 'XYZ'));
-
     const mc = mountCorrRef.current;
 
-    const upInv = mUp.clone().invert();
-    const foInv = mFo.clone().invert();
+    // Helper to process one arm
+    const processArm = (imuQuat, mAlign, mCorrR, tareRef) => {
+      if (!imuQuat?.upperArm) return null;
+      const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm));
+      const hwFo = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.forearm));
+      const hwHa = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.hand));
 
-    const alUp = hwUp.clone().multiply(mc.upper).multiply(mUp);
-    const alFo = upInv.clone().multiply(mc.forearmL).multiply(hwFo).multiply(mc.forearmR).multiply(mFo);
-    const alHa = foInv.clone().multiply(mc.handL).multiply(hwHa).multiply(mc.handR).multiply(mHa);
+      const mUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
+      const mFo = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.forearm[0]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[1]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
+      const mHa = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.hand[0]) || 0) * DEG2RAD, (parseFloat(mAlign.hand[1]) || 0) * DEG2RAD, (parseFloat(mAlign.hand[2]) || 0) * DEG2RAD, 'XYZ'));
 
-    const finalUp = tareUpperRef.current.clone().invert().multiply(alUp);
+      const alUp = hwUp.clone().multiply(mCorrR.upper).multiply(mUp);
+      const alFo = mUp.clone().invert().multiply(mCorrR.forearmL).multiply(hwFo).multiply(mCorrR.forearmR).multiply(mFo);
+      const alHa = mFo.clone().invert().multiply(mCorrR.handL).multiply(hwHa).multiply(mCorrR.handR).multiply(mHa);
 
-    rig.right.palm = {
-      isAligned: true,
-      upperArm: [finalUp.x, finalUp.y, finalUp.z, finalUp.w],
-      forearm: [alFo.x, alFo.y, alFo.z, alFo.w],
-      hand: [alHa.x, alHa.y, alHa.z, alHa.w]
+      const finalUp = tareRef.current.clone().invert().multiply(alUp);
+
+      return {
+        isAligned: true,
+        upperArm: [finalUp.x, finalUp.y, finalUp.z, finalUp.w],
+        forearm: [alFo.x, alFo.y, alFo.z, alFo.w],
+        hand: [alHa.x, alHa.y, alHa.z, alHa.w]
+      };
     };
-    rig.left.palm = defaultPalmL;
+
+    rig.right.palm = processArm(currentFrame.imuQuat, modelAlignRight, {
+      upper: mc.upperR, forearmL: mc.forearmR1, forearmR: mc.forearmR2, handL: mc.handR1, handR: mc.handR2
+    }, tareUpperRRef) || defaultPalmR;
+
+    rig.left.palm = processArm(currentFrame.leftImuQuat, modelAlignLeft, {
+      upper: mc.upperL, forearmL: mc.forearmL1, forearmR: mc.forearmL2, handL: mc.handL1, handR: mc.handL2
+    }, tareUpperLRef) || defaultPalmL;
+
     return rig;
-  }, [currentFrame, modelAlign, isCalibrated, manualFingersEnable, manualArmsEnable, manualFingers, manualThumbExtra, manualRightArm, manualLeftArm]);
+  }, [currentFrame, modelAlignRight, modelAlignLeft, isCalibrated, manualFingersEnable, manualArmsEnable, manualFingers, manualThumbExtra, manualRightArm, manualLeftArm]);
 
   const [user, setUser] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -2531,6 +2599,24 @@ export default function GloveCapture() {
                 >📡 IMU Calibration</button>
               </div>
 
+              {/* Hand Toggle */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 0, marginBottom: 16, background: 'rgba(0,0,0,0.2)', padding: '6px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                {['right', 'left'].map(hand => (
+                  <button
+                    key={hand}
+                    onClick={() => setCalHand(hand)}
+                    style={{
+                      flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 'bold', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                      background: calHand === hand ? '#60a5fa' : 'transparent',
+                      color: calHand === hand ? '#000' : '#a0aec0',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {hand} Hand
+                  </button>
+                ))}
+              </div>
+
               {calMainTab === 'exo' && (
                 <div style={s.panel}>
                   <div style={s.panelHeader}>
@@ -2550,23 +2636,6 @@ export default function GloveCapture() {
                   {/* Cal Status inline */}
                   <CalStatusStrip calStatus={calHand === 'left' ? (currentFrame?.leftCalStatus ?? 0) : (currentFrame?.calStatus ?? 0)} knotsByAxis={knotsByAxis} />
 
-                  {/* Hand Toggle */}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 8, background: 'rgba(0,0,0,0.2)', padding: '6px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    {['right', 'left'].map(hand => (
-                      <button
-                        key={hand}
-                        onClick={() => setCalHand(hand)}
-                        style={{
-                          flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 'bold', borderRadius: '6px', border: 'none', cursor: 'pointer',
-                          background: calHand === hand ? '#60a5fa' : 'transparent',
-                          color: calHand === hand ? '#000' : '#a0aec0',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        {hand} Hand
-                      </button>
-                    ))}
-                  </div>
 
                   {/* Tab navigation */}
                   <div style={{ display: 'flex', gap: 4, marginTop: 14, marginBottom: 2, borderBottom: '1px solid rgba(255,255,255,0.07)', paddingBottom: 0 }}>
@@ -2760,7 +2829,7 @@ export default function GloveCapture() {
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
 
-                    <AlignmentPanel modelAlign={modelAlign} setModelAlign={setModelAlign} onCalibrate={calibrateMountOffsets} onTare={tareHeading} />
+                    <AlignmentPanel modelAlign={calHand === 'left' ? modelAlignLeft : modelAlignRight} setModelAlign={calHand === 'left' ? setModelAlignLeft : setModelAlignRight} onCalibrate={calibrateMountOffsets} onTare={tareHeading} />
 
                     <div style={s.calSection}>
                       <div style={s.calSectionTitle}>1. Boot Calibration</div>
@@ -2809,7 +2878,7 @@ export default function GloveCapture() {
                     <div style={{ ...s.calSection, background: '#000', padding: '8px', border: '1px solid #333', overflow: 'hidden' }}>
                       <div style={{ fontSize: 10, color: '#666', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '1px', fontWeight: 'bold' }}>Firmware Logs</div>
                       <div style={{ height: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse', fontFamily: 'monospace', fontSize: 11, color: '#a0aec0' }}>
-                        {[...(gloveFrame.consoleLogs || [])].reverse().map((log, idx) => (
+                        {[...(gloveFrame.consoleLogs?.[calHand] || [])].reverse().map((log, idx) => (
                           <div key={idx} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{log.trim()}</div>
                         ))}
                       </div>
@@ -2898,6 +2967,8 @@ export default function GloveCapture() {
               <IMUDiagnosticsPanel
                 diag={currentFrame?.imuDiag ?? null}
                 imuQuat={currentFrame?.imuQuat ?? null}
+                leftImuQuat={currentFrame?.leftImuQuat ?? null}
+                dualImuStatus={currentFrame?.dualImuStatus ?? null}
               />
             </>
           )}
