@@ -38,6 +38,7 @@ const FINGER_PACKET_HEADER = 0xF1F2F3F4;
 const DUAL_FINGER_PACKET_HEADER = 0xF1F2F3F5;
 const RAW_VOLTAGES_PACKET_HEADER = 0xC0DEC0DE;
 const DUAL_RAW_VOLTAGES_PACKET_HEADER = 0xC0DEC0DF;
+const UNIFIED_PACKET_HEADER = 0x45534C47; // "ESLG"
 // Finger packet layout per spec: 4 header + 4 ts + 60 angles + 4 thumbExtra + 1 calStatus = 73
 const FINGER_PACKET_MIN_SIZE = 73;
 const FINGER_PACKET_OFFSET = 8;   // first angle byte
@@ -326,6 +327,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
     leftThumbExtra: 0,
     leftCalStatus: 0,
     leftConnected: false,
+    leftImuQuat: null,
     imuTimestamp: null,
     fingerTimestamp: null,
     imuDiag: null,
@@ -675,6 +677,141 @@ function useGloveWebSocket(ipAddress, onFrame) {
             pads: [],
           });
         }
+        if (header === UNIFIED_PACKET_HEADER) {
+          if (view.byteLength < 130) return;
+          const timestamp = view.getUint32(4, true);
+
+          const parseHand = (offset) => {
+            const unpackQuat = (off) => {
+              const packed = view.getUint32(off, true);
+              if (packed === 0) return { x: NaN, y: NaN, z: NaN, w: NaN, isZero: true };
+
+              const max_idx = (packed >>> 30) & 0x3;
+              const c1 = packed & 0x3FF;
+              const c2 = (packed >>> 10) & 0x3FF;
+              const c3 = (packed >>> 20) & 0x3FF;
+
+              const toFloat = (c) => (c / 723.395562) - 0.707106781;
+              const v1 = toFloat(c1);
+              const v2 = toFloat(c2);
+              const v3 = toFloat(c3);
+
+              const missing = Math.sqrt(Math.max(0, 1.0 - (v1*v1 + v2*v2 + v3*v3)));
+              
+              const q = [0,0,0,0];
+              let idx = 0;
+              for(let i=0; i<4; i++) {
+                  if(i === max_idx) {
+                      q[i] = missing;
+                  } else {
+                      if (idx === 0) q[i] = v1;
+                      else if (idx === 1) q[i] = v2;
+                      else if (idx === 2) q[i] = v3;
+                      idx++;
+                  }
+              }
+              const result = new THREE.Quaternion(q[1], q[2], q[3], q[0]).normalize();
+              result.isZero = false;
+              return result;
+            };
+
+            const rQ_U = unpackQuat(offset + 0);
+            const rQ_F = unpackQuat(offset + 4);
+            const rQ_H = unpackQuat(offset + 8);
+
+            const fingers = [];
+            for (let f = 0; f < 5; f++) {
+              fingers.push({
+                yaw: view.getInt8(offset + 12 + f * 3 + 0),
+                pitch1: view.getInt8(offset + 12 + f * 3 + 1),
+                pitch2: view.getInt8(offset + 12 + f * 3 + 2),
+              });
+            }
+            const thumbExtra = view.getInt8(offset + 27);
+            
+            const voltages = new Array(16);
+            for (let i = 0; i < 16; i++) {
+              voltages[i] = view.getUint16(offset + 28 + i * 2, true) / 10000.0;
+            }
+
+            const status = view.getUint8(offset + 60);
+            const calStatus = status & 0x1F;
+            const connected = ((status >>> 5) & 0x1) === 1;
+
+            return { rQ_U, rQ_F, rQ_H, fingers, thumbExtra, voltages, calStatus, connected };
+          };
+
+          const right = parseHand(8);
+          const left = parseHand(69);
+          
+          let imuQuat;
+          if (!isNaN(right.rQ_U.x) && !right.rQ_H.isZero) {
+            imuQuat = {
+              upperArm: [right.rQ_U.x, right.rQ_U.y, right.rQ_U.z, right.rQ_U.w],
+              forearm: [right.rQ_F.x, right.rQ_F.y, right.rQ_F.z, right.rQ_F.w],
+              hand: [right.rQ_H.x, right.rQ_H.y, right.rQ_H.z, right.rQ_H.w]
+            };
+          }
+
+          let leftImuQuat;
+          if (!isNaN(left.rQ_U.x) && left.connected && !left.rQ_H.isZero) {
+             leftImuQuat = {
+               upperArm: [left.rQ_U.x, left.rQ_U.y, left.rQ_U.z, left.rQ_U.w],
+               forearm: [left.rQ_F.x, left.rQ_F.y, left.rQ_F.z, left.rQ_F.w],
+               hand: [left.rQ_H.x, left.rQ_H.y, left.rQ_H.z, left.rQ_H.w]
+             };
+          }
+
+          const rightFloats = [...right.fingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), right.thumbExtra];
+          const leftFloats = [...left.fingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), left.thumbExtra];
+
+          fingerAnglesRef.current = right.fingers;
+          fingerAnglesFlatRef.current = rightFloats;
+          thumbExtraRef.current = right.thumbExtra;
+          if (imuQuat) imuQuatRef.current = imuQuat;
+          rawVoltagesRef.current = right.voltages;
+
+          setGloveState(prev => ({
+            ...prev,
+            ...(imuQuat ? { imuQuat } : {}),
+            ...(leftImuQuat ? { leftImuQuat } : {}),
+            fingerAngles: right.fingers,
+            fingerAnglesFlat: rightFloats,
+            thumbExtra: right.thumbExtra,
+            calStatus: right.calStatus,
+            leftFingerAngles: left.fingers,
+            leftFingerAnglesFlat: leftFloats,
+            leftThumbExtra: left.thumbExtra,
+            leftCalStatus: left.calStatus,
+            leftConnected: left.connected,
+            fingerTimestamp: timestamp,
+            imuTimestamp: timestamp,
+          }));
+
+          if (onFrame) {
+            onFrame({
+              source: 'unified',
+              fingers: rightFloats,
+              fingerAngles: right.fingers,
+              thumbExtra: right.thumbExtra,
+              calStatus: right.calStatus,
+              leftFingerAnglesFlat: leftFloats,
+              leftFingerAngles: left.fingers,
+              leftThumbExtra: left.thumbExtra,
+              leftCalStatus: left.calStatus,
+              imuQuat: imuQuat ?? imuQuatRef.current,
+              leftImuQuat,
+              flex: {},
+              pads: [],
+              rightVoltages: right.voltages,
+              leftVoltages: left.voltages,
+              timestamp,
+              leftConnected: left.connected
+            });
+          }
+          return;
+        }
+
       } catch (err) {
         console.error('Glove packet parse error:', err);
       }
