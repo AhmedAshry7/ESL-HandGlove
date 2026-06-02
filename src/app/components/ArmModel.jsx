@@ -231,23 +231,22 @@ function applyBoneQuaternion(node, quaternionArray, isAligned = false, forceZero
   const [x, y, z, w] = quaternionArray;
   const imuQ = new THREE.Quaternion(x, y, z, w).normalize();
 
-  // 1. Fully Calibrated (Mount offsets handled everything)
-  if (isAligned) {
-    node.quaternion.slerp(imuQ, LERP_SPEED);
-    return;
-  }
-
-  // 2. Pre-Calibration: Upper Arm (Absolute World Space)
+  // 1. Upper Arm (Absolute World Space)
+  // Even if calibrated (isAligned=true), the imuQ for the upper arm is a WORLD rotation.
+  // We must convert it into the local space of its parent (the Clavicle/Spine) because 
+  // the rigged model's parent bones have complex non-identity world rotations.
   if (isUpperArm && node.userData.worldRestQuat && node.parent) {
-    // Treat imuQ as a World Rotation
-    // Convert parent's world space into an inverse to calculate the new local rotation
     const parentWorldInv = node.userData.parentWorldRestQuat.clone().invert();
-    
-    // The new world rotation is the IMU's absolute rotation
     const newLocalQ = parentWorldInv.multiply(imuQ);
     node.quaternion.slerp(newLocalQ, LERP_SPEED);
     return;
   } 
+
+  // 2. Fully Calibrated Forearm / Hand (Mount offsets handled everything)
+  if (isAligned) {
+    node.quaternion.slerp(imuQ, LERP_SPEED);
+    return;
+  }
   
   // 3. Pre-Calibration: Forearm / Hand (Relative Local Space)
   if (!isUpperArm && node.userData.restQuat) {
@@ -363,11 +362,13 @@ export function CombinedArmRig({
       onRestPosesLoaded({
         right: {
           upper: armBones.rUpper?.userData?.restQuat?.clone() || new THREE.Quaternion(),
+          upperWorld: armBones.rUpper?.userData?.worldRestQuat?.clone() || new THREE.Quaternion(),
           forearm: armBones.rForearm?.userData?.restQuat?.clone() || new THREE.Quaternion(),
           hand: armBones.rHand?.userData?.restQuat?.clone() || new THREE.Quaternion(),
         },
         left: {
           upper: armBones.lUpper?.userData?.restQuat?.clone() || new THREE.Quaternion(),
+          upperWorld: armBones.lUpper?.userData?.worldRestQuat?.clone() || new THREE.Quaternion(),
           forearm: armBones.lForearm?.userData?.restQuat?.clone() || new THREE.Quaternion(),
           hand: armBones.lHand?.userData?.restQuat?.clone() || new THREE.Quaternion(),
         }

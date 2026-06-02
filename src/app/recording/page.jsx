@@ -202,6 +202,8 @@ function quatFromEuler(x, y, z) {
 function ConvertToThreeSpace(q, hand = 'right') {
   const conf = __imuAxisConfig[hand] || __imuAxisConfig.right;
   let mappedX = q.x, mappedY = q.y, mappedZ = q.z;
+  
+  // 1. Map components based on user selection
   if (conf.order === 'xyz') { mappedX = q.x; mappedY = q.y; mappedZ = q.z; }
   else if (conf.order === 'xzy') { mappedX = q.x; mappedY = q.z; mappedZ = q.y; }
   else if (conf.order === 'yxz') { mappedX = q.y; mappedY = q.x; mappedZ = q.z; }
@@ -209,12 +211,25 @@ function ConvertToThreeSpace(q, hand = 'right') {
   else if (conf.order === 'zxy') { mappedX = q.z; mappedY = q.x; mappedZ = q.y; }
   else if (conf.order === 'zyx') { mappedX = q.z; mappedY = q.y; mappedZ = q.x; }
 
-  return new THREE.Quaternion(
-    mappedX * conf.sX,
-    mappedY * conf.sY,
-    mappedZ * conf.sZ,
-    q.w * conf.sW
-  ).normalize();
+  mappedX *= conf.sX;
+  mappedY *= conf.sY;
+  mappedZ *= conf.sZ;
+  let mappedW = q.w * conf.sW;
+
+  // 2. Parity Check: Ensure the mapping is a valid Right-Handed rotation
+  const isSwapped = (conf.order === 'xzy' || conf.order === 'yxz' || conf.order === 'zyx');
+  const signFlips = (conf.sX < 0 ? 1 : 0) + (conf.sY < 0 ? 1 : 0) + (conf.sZ < 0 ? 1 : 0);
+  
+  // If we swapped axes (Det = -1) or flipped an odd number of signs (Det = -1)
+  const det = (isSwapped ? -1 : 1) * (signFlips % 2 !== 0 ? -1 : 1);
+  
+  // If Det == -1, the mapping turned the rotation inside-out (left-handed).
+  // Invert W to correct the rotation parity back to Right-Handed for Three.js.
+  if (det < 0) {
+      mappedW = -mappedW; 
+  }
+
+  return new THREE.Quaternion(mappedX, mappedY, mappedZ, mappedW).normalize();
 }
 
 function AxisMappingWidget({ hand }) {
@@ -423,6 +438,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
     imuPoseIdxL: 0,
   });
   const imuQuatRef = useRef(null);
+  const leftImuQuatRef = useRef(null);
   const fingerAnglesRef = useRef(null);
   const fingerAnglesFlatRef = useRef(null);
   const thumbExtraRef = useRef(0);
@@ -468,12 +484,12 @@ function useGloveWebSocket(ipAddress, onFrame) {
 
             let newPoseIdx = prev.imuPoseIdx;
             let newPoseIdxL = prev.imuPoseIdxL;
-            const match = logMsg.match(/Recorded Pose (\d+)\/6 successfully/);
+            const match = logMsg.match(/Recorded Pose (\d+)\/[36] successfully/);
             if (match) {
               if (isLeft) newPoseIdxL = parseInt(match[1], 10);
               else newPoseIdx = parseInt(match[1], 10);
             }
-            if (logMsg.includes("Static 6-poses calibration initialized") || logMsg.includes("Restarting calibration")) {
+            if (logMsg.includes("6-poses calibration") || logMsg.includes("3-poses calibration") || logMsg.includes("Restarting calibration")) {
               if (isLeft) newPoseIdxL = 0;
               else newPoseIdx = 0;
             }
@@ -595,7 +611,26 @@ function useGloveWebSocket(ipAddress, onFrame) {
           fingerAnglesFlatRef.current = rightFloats;
           thumbExtraRef.current = right.thumbExtra;
           if (imuQuat) imuQuatRef.current = imuQuat;
+          if (leftImuQuat) leftImuQuatRef.current = leftImuQuat;
           rawVoltagesRef.current = right.voltages;
+
+          const getWXYZ = (qArr) => {
+            if (!qArr || qArr.length !== 4 || qArr.some(isNaN)) return [1.0, 0.0, 0.0, 0.0];
+            return [qArr[3], qArr[0], qArr[1], qArr[2]]; // Convert [x,y,z,w] to [w,x,y,z]
+          };
+          const iqR = imuQuat ?? imuQuatRef.current;
+          const iqL = leftImuQuat ?? leftImuQuatRef.current;
+          
+          const flat56 = [
+            ...rightFloats,
+            ...getWXYZ(iqR?.hand),
+            ...getWXYZ(iqR?.forearm),
+            ...getWXYZ(iqR?.upperArm),
+            ...leftFloats,
+            ...getWXYZ(iqL?.hand),
+            ...getWXYZ(iqL?.forearm),
+            ...getWXYZ(iqL?.upperArm),
+          ];
 
           setGloveState(prev => ({
             ...prev,
@@ -633,6 +668,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
               rightVoltages: right.voltages,
               leftVoltages: left.voltages,
               timestamp,
+              flat56,
               leftConnected: left.connected,
               connected: right.connected
             });
@@ -1517,15 +1553,15 @@ export default function GloveCapture() {
 
   const mountCorrRef = useRef({
     upperR: new THREE.Quaternion(),
-    forearmR1: new THREE.Quaternion(),
-    forearmR2: new THREE.Quaternion(),
-    handR1: new THREE.Quaternion(),
-    handR2: new THREE.Quaternion(),
+    forearmRL: new THREE.Quaternion(),
+    forearmRR: new THREE.Quaternion(),
+    handRL: new THREE.Quaternion(),
+    handRR: new THREE.Quaternion(),
     upperL: new THREE.Quaternion(),
-    forearmL1: new THREE.Quaternion(),
-    forearmL2: new THREE.Quaternion(),
-    handL1: new THREE.Quaternion(),
-    handL2: new THREE.Quaternion()
+    forearmLL: new THREE.Quaternion(),
+    forearmLR: new THREE.Quaternion(),
+    handLL: new THREE.Quaternion(),
+    handLR: new THREE.Quaternion()
   });
 
   const restPosesRef = useRef(null);
@@ -1548,97 +1584,93 @@ export default function GloveCapture() {
     const imuQuat = isLeft ? frame?.leftImuQuat : frame?.imuQuat;
     const restPosesObj = isLeft ? restPosesRef.current?.left : restPosesRef.current?.right;
 
-    if (!imuQuat?.upperArm || !restPosesObj) {
-      console.warn("Cannot calibrate: missing IMU data or rest poses for " + calHandRef.current);
-      return;
-    }
-    const { upperArm, forearm, hand } = imuQuat;
+    if (!imuQuat?.upperArm || !restPosesObj) return;
 
     const handSide = isLeft ? 'left' : 'right';
-    const hwUpperWorld = ConvertToThreeSpace(new THREE.Quaternion().fromArray(upperArm), handSide);
-    const hwForearmLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(forearm), handSide);
-    const hwHandLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(hand), handSide);
+    const hwUpperWorld = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm), handSide);
+    const hwForearmLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.forearm), handSide);
+    const hwHandLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.hand), handSide);
 
     const mAlign = isLeft ? modelAlignLeftRef.current : modelAlignRightRef.current;
-    const mAlignUp = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-      (parseFloat(mAlign.upper[0]) || 0) * DEG2RAD,
-      (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD,
-      (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
-    const mAlignFo = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-      (parseFloat(mAlign.forearm[0]) || 0) * DEG2RAD,
-      (parseFloat(mAlign.forearm[1]) || 0) * DEG2RAD,
-      (parseFloat(mAlign.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
-    const mAlignHa = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-      (parseFloat(mAlign.hand[0]) || 0) * DEG2RAD,
-      (parseFloat(mAlign.hand[1]) || 0) * DEG2RAD,
-      (parseFloat(mAlign.hand[2]) || 0) * DEG2RAD, 'XYZ'));
+    const mAlignUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
+    const mAlignFo = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.forearm[0]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[1]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
+    const mAlignHa = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.hand[0]) || 0) * DEG2RAD, (parseFloat(mAlign.hand[1]) || 0) * DEG2RAD, (parseFloat(mAlign.hand[2]) || 0) * DEG2RAD, 'XYZ'));
 
-    const { upper: upperRestPose, forearm: forearmRestPose, hand: handRestPose } = restPosesObj;
+    const { upper: upperRestPose, upperWorld: upperRestWorld, forearm: forearmRestPose, hand: handRestPose } = restPosesObj;
 
-    // 1. Upper Arm
-    const alignedUpper_old = hwUpperWorld.clone().multiply(mAlignUp);
-    const delta = alignedUpper_old.clone().multiply(upperRestPose.clone().invert());
-    const deltaEuler = new THREE.Euler().setFromQuaternion(delta, 'YXZ');
-    const headingYaw = deltaEuler.y;
-    const qHeading = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, headingYaw, 0, 'XYZ'));
-    const Q_bone_ideal = qHeading.clone().multiply(upperRestPose);
-    const upperMountCorr = hwUpperWorld.clone().invert().multiply(Q_bone_ideal).multiply(mAlignUp.clone().invert());
+    // 1. Calculate World Tare (Body Facing Direction) via Swing-Twist
+    const hwUpAligned = hwUpperWorld.clone().multiply(mAlignUp);
+    const delta = hwUpAligned.clone().multiply(upperRestPose.clone().invert());
+    
+    // Extract pure Y-axis rotation, ignoring strap roll
+    let tareQ = new THREE.Quaternion(0, delta.y, 0, delta.w).normalize();
+    if (tareQ.lengthSq() < 0.0001) tareQ = new THREE.Quaternion(0, 1, 0, 0);
 
-    // 2. Forearm
+    if (isLeft) tareUpperLRef.current = tareQ;
+    else tareUpperRRef.current = tareQ;
+
+    // 2. Calculate Local Mount Offset
+    // This perfectly absorbs the physical strap crookedness
+    const upperMountCorr = hwUpperWorld.clone().invert()
+        .multiply(tareQ)
+        .multiply(upperRestWorld || upperRestPose)
+        .multiply(mAlignUp.clone().invert());
+
     const forearmMountL = upperMountCorr.clone().invert();
     const forearmMountR = hwForearmLocal.clone().invert()
-      .multiply(upperMountCorr).multiply(mAlignUp)
-      .multiply(forearmRestPose)
-      .multiply(mAlignFo.clone().invert());
+        .multiply(upperMountCorr).multiply(mAlignUp)
+        .multiply(forearmRestPose)
+        .multiply(mAlignFo.clone().invert());
 
-    // 3. Hand
     const handMountL = forearmMountR.clone().invert();
     const handMountR = hwHandLocal.clone().invert()
-      .multiply(forearmMountR).multiply(mAlignFo)
-      .multiply(handRestPose)
-      .multiply(mAlignHa.clone().invert());
+        .multiply(forearmMountR).multiply(mAlignFo)
+        .multiply(handRestPose)
+        .multiply(mAlignHa.clone().invert());
 
     if (isLeft) {
       mountCorrRef.current.upperL = upperMountCorr;
-      mountCorrRef.current.forearmL1 = forearmMountL;
-      mountCorrRef.current.forearmL2 = forearmMountR;
-      mountCorrRef.current.handL1 = handMountL;
-      mountCorrRef.current.handL2 = handMountR;
+      mountCorrRef.current.forearmLL = forearmMountL;
+      mountCorrRef.current.forearmLR = forearmMountR;
+      mountCorrRef.current.handLL = handMountL;
+      mountCorrRef.current.handLR = handMountR;
     } else {
       mountCorrRef.current.upperR = upperMountCorr;
-      mountCorrRef.current.forearmR1 = forearmMountL;
-      mountCorrRef.current.forearmR2 = forearmMountR;
-      mountCorrRef.current.handR1 = handMountL;
-      mountCorrRef.current.handR2 = handMountR;
+      mountCorrRef.current.forearmRL = forearmMountL;
+      mountCorrRef.current.forearmRR = forearmMountR;
+      mountCorrRef.current.handRL = handMountL;
+      mountCorrRef.current.handRR = handMountR;
     }
 
-    // Auto-tare heading after calibration
-    const calAlignedUpper = hwUpperWorld.clone().multiply(upperMountCorr).multiply(mAlignUp);
-    const calAlignedEuler = new THREE.Euler().setFromQuaternion(calAlignedUpper, 'YXZ');
-    const tareQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, calAlignedEuler.y, 0, 'XYZ'));
-    if (isLeft) tareUpperLRef.current = tareQ; else tareUpperRRef.current = tareQ;
-
     setIsCalibrated(true);
-    //console.log("Mount calibration complete for", calHandRef.current);
   }, []);
 
   const tareHeading = useCallback(() => {
     const frame = currentFrameRef.current;
     const isLeft = calHandRef.current === 'left';
     const imuQuat = isLeft ? frame?.leftImuQuat : frame?.imuQuat;
-    if (!imuQuat?.upperArm) return;
+    const restPosesObj = isLeft ? restPosesRef.current?.left : restPosesRef.current?.right;
+    
+    if (!imuQuat?.upperArm || !restPosesObj) return;
 
     const handSide = isLeft ? 'left' : 'right';
-    const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm), handSide);
-    const mAlign = isLeft ? modelAlignLeftRef.current : modelAlignRightRef.current;
-    const mUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
+    const hwUpperWorld = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm), handSide);
+    const { upper: upperRestPose } = restPosesObj;
 
-    const upperMountCorr = isLeft ? mountCorrRef.current.upperL : mountCorrRef.current.upperR;
-    const alUp = hwUp.clone().multiply(upperMountCorr).multiply(mUp);
-    const euler = new THREE.Euler().setFromQuaternion(alUp, 'YXZ');
-    const tareQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0, 'XYZ'));
-    if (isLeft) tareUpperLRef.current = tareQ; else tareUpperRRef.current = tareQ;
-    //console.log("Heading tared for", calHandRef.current);
+    const mAlign = isLeft ? modelAlignLeftRef.current : modelAlignRightRef.current;
+    const mAlignUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
+    const mCorrR = isLeft ? mountCorrRef.current.upperL : mountCorrRef.current.upperR;
+
+    // Find where the arm is currently pointing natively
+    const currentUntared = hwUpperWorld.clone().multiply(mCorrR).multiply(mAlignUp);
+
+    // Extract the new pure Y-axis difference
+    const delta = currentUntared.clone().multiply(upperRestPose.clone().invert());
+    let newTareQ = new THREE.Quaternion(0, delta.y, 0, delta.w).normalize();
+    if (newTareQ.lengthSq() < 0.0001) newTareQ = new THREE.Quaternion(0, 1, 0, 0);
+
+    if (isLeft) tareUpperLRef.current = newTareQ;
+    else tareUpperRRef.current = newTareQ;
   }, []);
 
   useEffect(() => {
@@ -1703,9 +1735,11 @@ export default function GloveCapture() {
       hand: quatFromEuler(...manualLeftArm.hand.map(d => (Number.isFinite(d) ? d * DEG2RAD : 0)))
     };
 
+    const fallbackPalmR = { forceZeroPose: true, ...defaultPalmR };
+    const fallbackPalmL = { forceZeroPose: true, ...defaultPalmL };
+
     const mc = mountCorrRef.current;
 
-    // Helper to process one arm
     const processArm = (imuQuat, mAlign, mCorrR, tareRef, handSide) => {
       if (!imuQuat?.upperArm) return null;
       const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm), handSide);
@@ -1716,27 +1750,33 @@ export default function GloveCapture() {
       const mFo = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.forearm[0]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[1]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
       const mHa = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.hand[0]) || 0) * DEG2RAD, (parseFloat(mAlign.hand[1]) || 0) * DEG2RAD, (parseFloat(mAlign.hand[2]) || 0) * DEG2RAD, 'XYZ'));
 
-      const alUp = hwUp.clone().multiply(mCorrR.upper).multiply(mUp);
-      const alFo = mUp.clone().invert().multiply(mCorrR.forearmL).multiply(hwFo).multiply(mCorrR.forearmR).multiply(mFo);
-      const alHa = mFo.clone().invert().multiply(mCorrR.handL).multiply(hwHa).multiply(mCorrR.handR).multiply(mHa);
+      // 1. Upper Arm: Inverse Tare (World Space) * Raw IMU * Mount Offset (Local Space) * Proxy
+      const tareQ = tareRef.current || new THREE.Quaternion();
+      const tareInverse = tareQ.clone().invert();
+      const alUp = tareInverse.multiply(hwUp).multiply(mCorrR.upper).multiply(mUp);
 
-      const finalUp = tareRef.current.clone().invert().multiply(alUp);
+      // 2. Forearm & Hand: (Relative IMUs don't need Tare)
+      const mUpInv = mUp.clone().invert();
+      const mFoInv = mFo.clone().invert();
+      
+      const alFo = mUpInv.multiply(mCorrR.forearmL).multiply(hwFo).multiply(mCorrR.forearmR).multiply(mFo);
+      const alHa = mFoInv.multiply(mCorrR.handL).multiply(hwHa).multiply(mCorrR.handR).multiply(mHa);
 
       return {
         isAligned: true,
-        upperArm: [finalUp.x, finalUp.y, finalUp.z, finalUp.w],
+        upperArm: [alUp.x, alUp.y, alUp.z, alUp.w],
         forearm: [alFo.x, alFo.y, alFo.z, alFo.w],
         hand: [alHa.x, alHa.y, alHa.z, alHa.w]
       };
     };
 
     const processedRight = processArm(frameData?.imuQuat, modelAlignRight, {
-      upper: mc.upperR, forearmL: mc.forearmR1, forearmR: mc.forearmR2, handL: mc.handR1, handR: mc.handR2
-    }, tareUpperRRef, 'right') || { ...defaultPalmR };
+      upper: mc.upperR, forearmL: mc.forearmRL, forearmR: mc.forearmRR, handL: mc.handRL, handR: mc.handRR
+    }, tareUpperRRef, 'right') || { ...fallbackPalmR };
 
     const processedLeft = processArm(frameData?.leftImuQuat, modelAlignLeft, {
-      upper: mc.upperL, forearmL: mc.forearmL1, forearmR: mc.forearmL2, handL: mc.handL1, handR: mc.handL2
-    }, tareUpperLRef, 'left') || { ...defaultPalmL };
+      upper: mc.upperL, forearmL: mc.forearmLL, forearmR: mc.forearmLR, handL: mc.handLL, handR: mc.handLR
+    }, tareUpperLRef, 'left') || { ...fallbackPalmL };
 
     processedRight.manualOverrides = manualArmsEnable.right;
     processedRight.manualValues = defaultPalmR;
@@ -2277,12 +2317,9 @@ export default function GloveCapture() {
     const startIdx = Math.floor((trimRange[0] / 100) * recordedFrames.length);
     const endIdx = Math.floor((trimRange[1] / 100) * recordedFrames.length);
     const trimmedFrames = recordedFrames.slice(startIdx, endIdx);
-
     setSigns(prev => [...prev, {
       label: signLabel,
-      frames: trimmedFrames,
-      trimStart: trimRange[0],
-      trimEnd: trimRange[1],
+      frames: trimmedFrames.map(f => [f.timestamp, ...(f.flat56 || [])]),
     }]);
 
     setModalOpen(false);
@@ -2850,20 +2887,25 @@ export default function GloveCapture() {
                     </div>
 
                     <div style={s.calSection}>
-                      <div style={s.calSectionTitle}>3. 6-Pose Static Alignment</div>
-                      <p style={s.calHint}>Align the coordinate frames by holding 6 distinct poses (T-pose, N-pose, etc). Click Record for each.</p>
+                      <div style={s.calSectionTitle}>3. 3-Pose Static Alignment</div>
+                      <p style={s.calHint}>Align the coordinate frames by holding 3 distinct poses:<br />
+                        Pose 1: Arm straight down at your side, palm facing inward.<br />
+                        Pose 2: Arm straight out to the side, palm facing down.<br />
+                        Pose 3: Arm straight forward, palm faces inward (to the side).<br />
+                        Click Record for each.
+                      </p>
                       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                         <button style={{ ...s.calBtnSecondary, flex: 1 }} onClick={() => runCommand(CMD.START_STATIC_ALIGN)} disabled={!isConnected}>
                           Start Alignment
                         </button>
-                        <button style={{ ...s.calBtn, flex: 2, background: (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 6 ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)' }}
+                        <button style={{ ...s.calBtn, flex: 2, background: (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 3 ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)' }}
                           onClick={() => {
-                            if ((calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 6) {
+                            if ((calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 3) {
                               runCommand(CMD.RECORD_STATIC_POSE);
                             }
                           }}
-                          disabled={!isConnected || (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) >= 6}>
-                          Record Pose {(calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 6 ? (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) + 1 : 'Complete'}
+                          disabled={!isConnected || (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) >= 3}>
+                          Record Pose {(calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 3 ? (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) + 1 : 'Complete'}
                         </button>
                       </div>
                       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -3059,15 +3101,6 @@ export default function GloveCapture() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 11, fontWeight: 600, color: '#a0aec0' }}>🧪 Manual Arms / Offline Pose</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      localStorage.setItem('esl_glove_offline_right', JSON.stringify(manualRightArm));
-                      localStorage.setItem('esl_glove_offline_left', JSON.stringify(manualLeftArm));
-                      alert('Offline default pose saved to local storage!');
-                    }}
-                    style={{ fontSize: 10, padding: '3px 8px', background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 6, color: '#34d399', cursor: 'pointer' }}
-                  >Save Default</button>
                 </div>
               </div>
 
