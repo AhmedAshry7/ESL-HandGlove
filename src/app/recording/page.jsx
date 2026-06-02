@@ -12,6 +12,12 @@ import * as THREE from 'three';
 // Set to false before deploying to production to hide all developer UI.
 const DEV_MODE = true;
 
+// ─── IMU Axis Mapping (Mutable Global) ──────────────────────────────────────
+let __imuAxisConfig = {
+  right: { order: 'zxy', sX: -1, sY: -1, sZ: 1, sW: 1 },
+  left: { order: 'zxy', sX: -1, sY: -1, sZ: 1, sW: 1 }
+};
+
 // ─── Sensor readings panel ───────────────────────────────────────────────────
 
 const FINGER_LABELS = [
@@ -52,9 +58,11 @@ const CMD = {
   SET_COUPLING: 0x11,
   SAVE_CAL: 0x12,
   LOAD_CAL: 0x13,
+  SET_IMU_CAL: 0x14,
   SWITCH_TO_WIFI: 0x20,
   SWITCH_TO_BLE: 0x21,
   REQUEST_RAW: 0x30,
+  REQ_IMU_CAL: 0x31,
   DEVICE_RESET: 0xFF,
 };
 
@@ -191,12 +199,67 @@ function quatFromEuler(x, y, z) {
   return [q.x, q.y, q.z, q.w];
 }
 
-function ConvertToThreeSpace(q) {
-  // Direct pass-through (X=X, Y=Y, Z=Z). If X was right but Y/Z were swapped, this swaps them back!
-  // return new THREE.Quaternion(q.x, q.y, q.z, q.w).normalize();
-  return new THREE.Quaternion(q.y, -q.z, -q.x, q.w).normalize();
+function ConvertToThreeSpace(q, hand = 'right') {
+  const conf = __imuAxisConfig[hand] || __imuAxisConfig.right;
+  let mappedX = q.x, mappedY = q.y, mappedZ = q.z;
+  if (conf.order === 'xyz') { mappedX = q.x; mappedY = q.y; mappedZ = q.z; }
+  else if (conf.order === 'xzy') { mappedX = q.x; mappedY = q.z; mappedZ = q.y; }
+  else if (conf.order === 'yxz') { mappedX = q.y; mappedY = q.x; mappedZ = q.z; }
+  else if (conf.order === 'yzx') { mappedX = q.y; mappedY = q.z; mappedZ = q.x; }
+  else if (conf.order === 'zxy') { mappedX = q.z; mappedY = q.x; mappedZ = q.y; }
+  else if (conf.order === 'zyx') { mappedX = q.z; mappedY = q.y; mappedZ = q.x; }
+
+  return new THREE.Quaternion(
+    mappedX * conf.sX,
+    mappedY * conf.sY,
+    mappedZ * conf.sZ,
+    q.w * conf.sW
+  ).normalize();
 }
 
+function AxisMappingWidget({ hand }) {
+  const [, forceRender] = useState(0);
+  const conf = __imuAxisConfig[hand] || __imuAxisConfig.right;
+
+  const toggleSign = (axis) => {
+    conf[axis] *= -1;
+    forceRender(x => x + 1);
+  };
+
+  return (
+    <div style={{ background: 'rgba(10,12,28,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#a0aec0', marginBottom: 12, letterSpacing: '0.8px', textTransform: 'uppercase' }}>
+        🔀 Axis Swizzle Tester ({hand === 'left' ? 'LEFT' : 'RIGHT'})
+      </div>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ fontSize: 11, color: '#e2e8f0' }}>Order:</span>
+        <select
+          value={conf.order}
+          onChange={(e) => { conf.order = e.target.value; forceRender(x => x + 1); }}
+          style={{ background: '#1a202c', color: '#e2e8f0', border: '1px solid #4a5568', padding: '4px 8px', borderRadius: 4, fontSize: 11 }}
+        >
+          <option value="xyz">XYZ</option>
+          <option value="xzy">XZY</option>
+          <option value="yxz">YXZ</option>
+          <option value="yzx">YZX</option>
+          <option value="zxy">ZXY</option>
+          <option value="zyx">ZYX</option>
+        </select>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {['sX', 'sY', 'sZ', 'sW'].map(axis => (
+          <button key={axis} onClick={() => toggleSign(axis)} style={{
+            flex: 1, padding: '4px 0', background: conf[axis] === 1 ? 'rgba(52,211,153,0.15)' : 'rgba(239,68,68,0.15)',
+            border: `1px solid ${conf[axis] === 1 ? 'rgba(52,211,153,0.3)' : 'rgba(239,68,68,0.3)'}`,
+            color: conf[axis] === 1 ? '#34d399' : '#ef4444', borderRadius: 4, fontSize: 11, fontWeight: 'bold'
+          }}>
+            {axis}: {conf[axis] === 1 ? '+' : '-'}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 function AlignmentPanel({ modelAlign, setModelAlign, onCalibrate, onTare }) {
   const cycleAlign = (part, axis) => {
     setModelAlign(prev => {
@@ -357,6 +420,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
     imuDiag: null,
     consoleLogs: { right: [], left: [] },
     imuPoseIdx: 0,
+    imuPoseIdxL: 0,
   });
   const imuQuatRef = useRef(null);
   const fingerAnglesRef = useRef(null);
@@ -378,11 +442,11 @@ function useGloveWebSocket(ipAddress, onFrame) {
     wsRef.current = socket;
 
     socket.onopen = () => {
-      //console.log('[Glove] Connected');
+      console.log('[Glove] Connected');
       setGloveState(prev => ({ ...prev, connected: true }));
     };
     socket.onclose = () => {
-      //console.log('[Glove] Disconnected');
+      console.log('[Glove] Disconnected');
       setGloveState(prev => ({ ...prev, connected: false }));
       wsRef.current = null;
     };
@@ -390,26 +454,31 @@ function useGloveWebSocket(ipAddress, onFrame) {
 
     socket.onmessage = async (event) => {
       try {
-
+        //console.log('[Glove] Received:', event);
+        // console.log("Here is the received data:", event.data);
         if (typeof event.data === 'string') {
           const logMsg = event.data;
+          console.log('[Glove] Received string:', logMsg);
           setGloveState(prev => {
-            const isLeft = logMsg.includes("[LEFT]");
+            const isLeft = logMsg.includes("[LEFT]") || logMsg.includes("[SLAVE]");
             const target = isLeft ? 'left' : 'right';
             const currentLogs = prev.consoleLogs || { right: [], left: [] };
             const newLogs = { ...currentLogs };
             newLogs[target] = [...(currentLogs[target] || []), logMsg].slice(-50); // Keep last 50 logs per hand
 
             let newPoseIdx = prev.imuPoseIdx;
+            let newPoseIdxL = prev.imuPoseIdxL;
             const match = logMsg.match(/Recorded Pose (\d+)\/6 successfully/);
-            if (match && !isLeft) {
-              newPoseIdx = parseInt(match[1], 10);
+            if (match) {
+              if (isLeft) newPoseIdxL = parseInt(match[1], 10);
+              else newPoseIdx = parseInt(match[1], 10);
             }
-            if (!isLeft && (logMsg.includes("Static 6-poses calibration initialized") || logMsg.includes("Restarting calibration"))) {
-              newPoseIdx = 0;
+            if (logMsg.includes("Static 6-poses calibration initialized") || logMsg.includes("Restarting calibration")) {
+              if (isLeft) newPoseIdxL = 0;
+              else newPoseIdx = 0;
             }
 
-            return { ...prev, consoleLogs: newLogs, imuPoseIdx: newPoseIdx };
+            return { ...prev, consoleLogs: newLogs, imuPoseIdx: newPoseIdx, imuPoseIdxL: newPoseIdxL };
           });
           return;
         }
@@ -422,65 +491,69 @@ function useGloveWebSocket(ipAddress, onFrame) {
 
         if (buffer.byteLength < 4) return;
         const header = view.getUint32(0, true);
+
+        if (header === 0x494D5543) { // "IMUC"
+          if (view.byteLength < 54) return;
+          const role = view.getUint8(4);
+          const imuIdx = view.getUint8(5);
+          const bias = [view.getFloat32(6, true), view.getFloat32(10, true), view.getFloat32(14, true)];
+          const W = [];
+          for (let i = 0; i < 9; i++) {
+            W.push(view.getFloat32(18 + (i * 4), true));
+          }
+
+          setGloveState(prev => {
+            const next = { ...prev };
+            if (!next.imuCalibrations) next.imuCalibrations = { right: [], left: [] };
+            const target = role === 0 ? 'right' : 'left';
+            const calList = [...(next.imuCalibrations[target] || [])];
+            calList[imuIdx] = { bias, W };
+            return { ...next, imuCalibrations: { ...next.imuCalibrations, [target]: calList } };
+          });
+          return;
+        }
+
         if (header === UNIFIED_PACKET_HEADER) {
           //console.log("Unified packet received");
-          if (view.byteLength < 130) return;
+          if (view.byteLength < 154) return;
           const timestamp = view.getUint32(4, true);
-
+          //console.log("Unified packet received, here are the contents:  ", view);
+          console
           const parseHand = (offset) => {
             const unpackQuat = (off) => {
-              const packed = view.getUint32(off, true);
-              if (packed === 0) return { x: NaN, y: NaN, z: NaN, w: NaN, isZero: true };
+              const w = view.getInt16(off + 0, true) / 32767.0;
+              const x = view.getInt16(off + 2, true) / 32767.0;
+              const y = view.getInt16(off + 4, true) / 32767.0;
+              const z = view.getInt16(off + 6, true) / 32767.0;
 
-              const max_idx = (packed >>> 30) & 0x3;
-              const c1 = (packed >>> 20) & 0x3FF;
-              const c2 = (packed >>> 10) & 0x3FF;
-              const c3 = packed & 0x3FF;
-
-              const mapToFloat = (val) => (val - 511.5) * (0.707106781 / 511.5);
-              const v1 = mapToFloat(c1);
-              const v2 = mapToFloat(c2);
-              const v3 = mapToFloat(c3);
-
-              const missing = Math.sqrt(Math.max(0, 1.0 - (v1 * v1 + v2 * v2 + v3 * v3)));
-
-              const q = [0, 0, 0, 0];
-              let idx = 0;
-              for (let i = 0; i < 4; i++) {
-                if (i === max_idx) {
-                  q[i] = missing;
-                } else {
-                  if (idx === 0) q[i] = v1;
-                  else if (idx === 1) q[i] = v2;
-                  else if (idx === 2) q[i] = v3;
-                  idx++;
-                }
+              if (w === 0 && x === 0 && y === 0 && z === 0) {
+                return { x: NaN, y: NaN, z: NaN, w: NaN, isZero: true };
               }
-              const result = new THREE.Quaternion(q[1], q[2], q[3], q[0]).normalize();
+              const result = new THREE.Quaternion(x, y, z, w).normalize();
               result.isZero = false;
               return result;
             };
 
             const rQ_U = unpackQuat(offset + 0);
-            const rQ_F = unpackQuat(offset + 4);
-            const rQ_H = unpackQuat(offset + 8);
+            const rQ_F = unpackQuat(offset + 8);
+            const rQ_H = unpackQuat(offset + 16);
 
             const fingers = [];
             for (let f = 0; f < 5; f++) {
               fingers.push({
-                yaw: view.getInt8(offset + 12 + f * 3 + 0),
-                pitch1: view.getInt8(offset + 12 + f * 3 + 1),
-                pitch2: view.getInt8(offset + 12 + f * 3 + 2),
+                yaw: view.getInt8(offset + 24 + f * 3 + 0),
+                pitch1: view.getInt8(offset + 24 + f * 3 + 1),
+                pitch2: view.getInt8(offset + 24 + f * 3 + 2),
               });
             }
-            const thumbExtra = view.getInt8(offset + 27);
+            const thumbExtra = view.getInt8(offset + 39);
 
             const voltages = new Array(16);
             for (let i = 0; i < 16; i++) {
-              voltages[i] = view.getUint16(offset + 28 + i * 2, true) / 10000.0;
+              voltages[i] = view.getUint16(offset + 40 + i * 2, true) / 10000.0;
             }
 
-            const status = view.getUint8(offset + 60);
+            const status = view.getUint8(offset + 72);
             const calStatus = status & 0x1F;
             const connected = ((status >>> 5) & 0x1) === 1;
 
@@ -488,7 +561,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
           };
 
           const right = parseHand(8);
-          const left = parseHand(69);
+          const left = parseHand(81);
 
           let imuQuat;
           if (!isNaN(right.rQ_U.x) && !right.rQ_H.isZero) {
@@ -506,6 +579,13 @@ function useGloveWebSocket(ipAddress, onFrame) {
               forearm: [left.rQ_F.x, left.rQ_F.y, left.rQ_F.z, left.rQ_F.w],
               hand: [left.rQ_H.x, left.rQ_H.y, left.rQ_H.z, left.rQ_H.w]
             };
+          }
+
+          if (imuQuat) {
+            console.log(`[IMU R] U[${imuQuat.upperArm.map(v=>v.toFixed(2)).join(',')}] F[${imuQuat.forearm.map(v=>v.toFixed(2)).join(',')}] H[${imuQuat.hand.map(v=>v.toFixed(2)).join(',')}]`);
+          }
+          if (leftImuQuat) {
+            console.log(`[IMU L] U[${leftImuQuat.upperArm.map(v=>v.toFixed(2)).join(',')}] F[${leftImuQuat.forearm.map(v=>v.toFixed(2)).join(',')}] H[${leftImuQuat.hand.map(v=>v.toFixed(2)).join(',')}]`);
           }
 
           const rightFloats = [...right.fingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), right.thumbExtra];
@@ -751,7 +831,7 @@ function IMUDiagnosticsPanel({ diag, imuQuat, leftImuQuat, dualImuStatus }) {
                 <span>{imu.label}</span>
                 <span style={{ color: imu.magActive ? '#34d399' : '#a0aec0', fontSize: 10 }}>● {imu.magActive ? 'Mag Active' : 'Mag Off'}</span>
               </div>
-              
+
               {(() => {
                 // Convert raw IMU quaternion to Euler angles for visualization
                 const q = new THREE.Quaternion(imu.data[0], imu.data[1], imu.data[2], imu.data[3]);
@@ -1159,6 +1239,13 @@ function RecordingModal({
   onSave,
   currentFrame,
   calibrate,
+  restRotationR,
+  restRotationL,
+  wristLimits,
+  armLimits,
+  fingerLimits,
+  restPosesRef,
+  computeRigFromFrame,
 }) {
   const frameCount = frames.length;
   const duration = (frameCount / 60).toFixed(1);
@@ -1185,7 +1272,7 @@ function RecordingModal({
   }, [isRecording, frames, trimStart, trimEnd]);
 
   const displayFrame = isRecording ? currentFrame : playbackFrame;
-  const displayRigData = buildRigData(displayFrame);
+  const displayRigData = computeRigFromFrame(displayFrame);
 
   return (
     <div style={rm.overlay}>
@@ -1222,7 +1309,15 @@ function RecordingModal({
           <div style={rm.vpLabel}>
             {isRecording ? 'LIVE CAPTURE' : 'PLAYBACK PREVIEW'}
           </div>
-          <Scene rigData={displayRigData} />
+          <Scene
+              rigData={displayRigData}
+              restRotationR={restRotationR}
+              restRotationL={restRotationL}
+              wristLimits={wristLimits}
+              armLimits={armLimits}
+              fingerLimits={fingerLimits}
+              onRestPosesLoaded={(poses) => { restPosesRef.current = poses; }}
+            />
           {!displayFrame && (
             <div style={rm.vpOverlay}>
               <p style={{ fontSize: 13, color: '#4a5568' }}>Waiting for glove connection…</p>
@@ -1459,9 +1554,10 @@ export default function GloveCapture() {
     }
     const { upperArm, forearm, hand } = imuQuat;
 
-    const hwUpperWorld = ConvertToThreeSpace(new THREE.Quaternion().fromArray(upperArm));
-    const hwForearmLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(forearm));
-    const hwHandLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(hand));
+    const handSide = isLeft ? 'left' : 'right';
+    const hwUpperWorld = ConvertToThreeSpace(new THREE.Quaternion().fromArray(upperArm), handSide);
+    const hwForearmLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(forearm), handSide);
+    const hwHandLocal = ConvertToThreeSpace(new THREE.Quaternion().fromArray(hand), handSide);
 
     const mAlign = isLeft ? modelAlignLeftRef.current : modelAlignRightRef.current;
     const mAlignUp = new THREE.Quaternion().setFromEuler(new THREE.Euler(
@@ -1532,7 +1628,8 @@ export default function GloveCapture() {
     const imuQuat = isLeft ? frame?.leftImuQuat : frame?.imuQuat;
     if (!imuQuat?.upperArm) return;
 
-    const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm));
+    const handSide = isLeft ? 'left' : 'right';
+    const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm), handSide);
     const mAlign = isLeft ? modelAlignLeftRef.current : modelAlignRightRef.current;
     const mUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
 
@@ -1580,8 +1677,9 @@ export default function GloveCapture() {
     hand: [17, 0, 0]
   });
 
-  const rigFrame = useMemo(() => {
-    const frameData = { ...currentFrame };
+  const computeRigFromFrame = useCallback((frameDataInput) => {
+    if (!frameDataInput) return null;
+    const frameData = { ...frameDataInput };
     if (manualFingersEnable) {
       frameData.fingerAngles = manualFingers;
       frameData.thumbExtra = manualThumbExtra;
@@ -1608,11 +1706,11 @@ export default function GloveCapture() {
     const mc = mountCorrRef.current;
 
     // Helper to process one arm
-    const processArm = (imuQuat, mAlign, mCorrR, tareRef) => {
+    const processArm = (imuQuat, mAlign, mCorrR, tareRef, handSide) => {
       if (!imuQuat?.upperArm) return null;
-      const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm));
-      const hwFo = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.forearm));
-      const hwHa = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.hand));
+      const hwUp = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.upperArm), handSide);
+      const hwFo = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.forearm), handSide);
+      const hwHa = ConvertToThreeSpace(new THREE.Quaternion().fromArray(imuQuat.hand), handSide);
 
       const mUp = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.upper[0]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[1]) || 0) * DEG2RAD, (parseFloat(mAlign.upper[2]) || 0) * DEG2RAD, 'XYZ'));
       const mFo = new THREE.Quaternion().setFromEuler(new THREE.Euler((parseFloat(mAlign.forearm[0]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[1]) || 0) * DEG2RAD, (parseFloat(mAlign.forearm[2]) || 0) * DEG2RAD, 'XYZ'));
@@ -1632,13 +1730,13 @@ export default function GloveCapture() {
       };
     };
 
-    const processedRight = processArm(currentFrame?.imuQuat, modelAlignRight, {
+    const processedRight = processArm(frameData?.imuQuat, modelAlignRight, {
       upper: mc.upperR, forearmL: mc.forearmR1, forearmR: mc.forearmR2, handL: mc.handR1, handR: mc.handR2
-    }, tareUpperRRef) || { ...defaultPalmR };
+    }, tareUpperRRef, 'right') || { ...defaultPalmR };
 
-    const processedLeft = processArm(currentFrame?.leftImuQuat, modelAlignLeft, {
+    const processedLeft = processArm(frameData?.leftImuQuat, modelAlignLeft, {
       upper: mc.upperL, forearmL: mc.forearmL1, forearmR: mc.forearmL2, handL: mc.handL1, handR: mc.handL2
-    }, tareUpperLRef) || { ...defaultPalmL };
+    }, tareUpperLRef, 'left') || { ...defaultPalmL };
 
     processedRight.manualOverrides = manualArmsEnable.right;
     processedRight.manualValues = defaultPalmR;
@@ -1649,7 +1747,9 @@ export default function GloveCapture() {
     rig.left.palm = processedLeft;
 
     return rig;
-  }, [currentFrame, modelAlignRight, modelAlignLeft, isCalibrated, manualFingersEnable, manualArmsEnable, manualFingers, manualThumbExtra, manualRightArm, manualLeftArm]);
+  }, [modelAlignRight, modelAlignLeft, isCalibrated, manualFingersEnable, manualArmsEnable, manualFingers, manualThumbExtra, manualRightArm, manualLeftArm]);
+
+  const rigFrame = useMemo(() => computeRigFromFrame(currentFrame), [computeRigFromFrame, currentFrame]);
 
   const [user, setUser] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -2729,6 +2829,7 @@ export default function GloveCapture() {
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
 
+                    <AxisMappingWidget hand={calHand} />
                     <AlignmentPanel modelAlign={calHand === 'left' ? modelAlignLeft : modelAlignRight} setModelAlign={calHand === 'left' ? setModelAlignLeft : setModelAlignRight} onCalibrate={calibrateMountOffsets} onTare={tareHeading} />
 
                     <div style={s.calSection}>
@@ -2755,14 +2856,14 @@ export default function GloveCapture() {
                         <button style={{ ...s.calBtnSecondary, flex: 1 }} onClick={() => runCommand(CMD.START_STATIC_ALIGN)} disabled={!isConnected}>
                           Start Alignment
                         </button>
-                        <button style={{ ...s.calBtn, flex: 2, background: gloveFrame.imuPoseIdx < 6 ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)' }}
+                        <button style={{ ...s.calBtn, flex: 2, background: (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 6 ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)' }}
                           onClick={() => {
-                            if (gloveFrame.imuPoseIdx < 6) {
+                            if ((calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 6) {
                               runCommand(CMD.RECORD_STATIC_POSE);
                             }
                           }}
-                          disabled={!isConnected || gloveFrame.imuPoseIdx >= 6}>
-                          Record Pose {gloveFrame.imuPoseIdx < 6 ? gloveFrame.imuPoseIdx + 1 : 'Complete'}
+                          disabled={!isConnected || (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) >= 6}>
+                          Record Pose {(calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) < 6 ? (calHand === 'right' ? gloveFrame.imuPoseIdx : gloveFrame.imuPoseIdxL) + 1 : 'Complete'}
                         </button>
                       </div>
                       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -2889,6 +2990,13 @@ export default function GloveCapture() {
           onSave={handleSaveSign}
           currentFrame={currentFrame}
           calibrate={calibrateRef}
+          restRotationR={restRotationR}
+          restRotationL={restRotationL}
+          wristLimits={wristLimits}
+          armLimits={armLimits}
+          fingerLimits={fingerLimits}
+          restPosesRef={restPosesRef}
+          computeRigFromFrame={computeRigFromFrame}
         />
       )}
       {/* ── DEV TOOLS PANEL (hidden in production) ── */}
@@ -2974,12 +3082,12 @@ export default function GloveCapture() {
                       <div key={joint} style={{ marginBottom: 12 }}>
                         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <input 
-                              type="checkbox" 
-                              checked={overrides[joint]} 
+                            <input
+                              type="checkbox"
+                              checked={overrides[joint]}
                               onChange={e => setManualArmsEnable(prev => ({
                                 ...prev, [armKey]: { ...prev[armKey], [joint]: e.target.checked }
-                              }))} 
+                              }))}
                             />
                             <span style={{ fontSize: 11, color: '#a0aec0', textTransform: 'capitalize' }}>{joint} override</span>
                           </label>

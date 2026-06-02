@@ -287,7 +287,27 @@ export function CombinedArmRig({
 }) {
   const group = useRef();
   const { scene } = useGLTF('/HumanCharacterDummy_M.glb');
-  const clone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const clone = useMemo(() => {
+    const c = SkeletonUtils.clone(scene);
+    c.updateMatrixWorld(true);
+    c.traverse(node => {
+      if (node.isBone) {
+        node.userData.restQuat = node.quaternion.clone();
+        
+        // Save world rest orientation to properly apply world-space IMU rotations
+        const worldQuat = new THREE.Quaternion();
+        node.getWorldQuaternion(worldQuat);
+        node.userData.worldRestQuat = worldQuat;
+        
+        if (node.parent) {
+          const parentWorldQuat = new THREE.Quaternion();
+          node.parent.getWorldQuaternion(parentWorldQuat);
+          node.userData.parentWorldRestQuat = parentWorldQuat;
+        }
+      }
+    });
+    return c;
+  }, [scene]);
   const { nodes } = useGraph(clone);
 
   // Robustly find the correct main bones (ignoring twist bones like .001)
@@ -329,26 +349,6 @@ export function CombinedArmRig({
   useEffect(() => {
     if (!nodes) return;
     axesHelpersRef.current = [];
-
-    // Force a matrix update
-    clone.updateMatrixWorld(true);
-
-    Object.values(nodes).forEach(node => {
-      if (node.isBone && !node.userData.restQuat) {
-        node.userData.restQuat = node.quaternion.clone();
-        
-        // Save world rest orientation to properly apply world-space IMU rotations
-        const worldQuat = new THREE.Quaternion();
-        node.getWorldQuaternion(worldQuat);
-        node.userData.worldRestQuat = worldQuat;
-        
-        if (node.parent) {
-          const parentWorldQuat = new THREE.Quaternion();
-          node.parent.getWorldQuaternion(parentWorldQuat);
-          node.userData.parentWorldRestQuat = parentWorldQuat;
-        }
-      }
-    });
 
     // Create World-Space Axes Helpers for the main arm bones to avoid skeletal scale/shear distortions
     [armBones.rUpper, armBones.rForearm, armBones.rHand, armBones.lUpper, armBones.lForearm, armBones.lHand].forEach(bone => {
