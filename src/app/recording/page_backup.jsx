@@ -951,7 +951,7 @@ function RecordingModal({
 export default function GloveCapture() {
   const router = useRouter();
 
-  const ESP_IP = "192.168.1.8";
+  const ESP_IP = "192.168.1.17";
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false);

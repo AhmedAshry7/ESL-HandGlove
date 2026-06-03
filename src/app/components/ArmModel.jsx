@@ -116,7 +116,7 @@ function clampArmQuat(quatArray, limits) {
   } else if (limits.radial !== undefined) {
     euler.y = clamp(euler.y, -(limits.radial * DEG2RAD), limits.ulnar * DEG2RAD);
   }
-  
+
   if (limits.internal !== undefined) {
     euler.z = clamp(euler.z, -(limits.external * DEG2RAD), limits.internal * DEG2RAD);
   } else if (limits.pronation !== undefined) {
@@ -240,14 +240,14 @@ function applyBoneQuaternion(node, quaternionArray, isAligned = false, forceZero
     const newLocalQ = parentWorldInv.multiply(imuQ);
     node.quaternion.slerp(newLocalQ, LERP_SPEED);
     return;
-  } 
+  }
 
   // 2. Fully Calibrated Forearm / Hand (Mount offsets handled everything)
   if (isAligned) {
     node.quaternion.slerp(imuQ, LERP_SPEED);
     return;
   }
-  
+
   // 3. Pre-Calibration: Forearm / Hand (Relative Local Space)
   if (!isUpperArm && node.userData.restQuat) {
     // Treat imuQ as a Local Delta
@@ -273,8 +273,7 @@ function applyBoneEuler(node, eulerArray) {
 }
 
 export function CombinedArmRig({
-  leftHandSensorData,
-  rightHandSensorData,
+  rigDataRef,
   restRotationR = [3.15, 2.29, 3.15],
   restRotationL = [3.15, -2.29, 3.15],
   // Biomechanical constraints — pass null/undefined to disable clamping
@@ -292,12 +291,12 @@ export function CombinedArmRig({
     c.traverse(node => {
       if (node.isBone) {
         node.userData.restQuat = node.quaternion.clone();
-        
+
         // Save world rest orientation to properly apply world-space IMU rotations
         const worldQuat = new THREE.Quaternion();
         node.getWorldQuaternion(worldQuat);
         node.userData.worldRestQuat = worldQuat;
-        
+
         if (node.parent) {
           const parentWorldQuat = new THREE.Quaternion();
           node.parent.getWorldQuaternion(parentWorldQuat);
@@ -385,6 +384,8 @@ export function CombinedArmRig({
 
   useFrame(() => {
     if (!nodes) return;
+    const rightHandSensorData = rigDataRef?.current?.right;
+    const leftHandSensorData = rigDataRef?.current?.left;
 
     // ── RIGHT ARM BONES ──────────────────────────────────────
     const forceZero = rightHandSensorData?.palm?.forceZeroPose || false;
@@ -540,8 +541,7 @@ export function CombinedArmRig({
 }
 
 export function ArmModel({
-  leftHandSensorData,
-  rightHandSensorData,
+  rigDataRef,
   restRotationR,
   restRotationL,
   wristLimits,
@@ -551,8 +551,7 @@ export function ArmModel({
   return (
     <group>
       <CombinedArmRig
-        leftHandSensorData={leftHandSensorData}
-        rightHandSensorData={rightHandSensorData}
+        rigDataRef={rigDataRef}
         restRotationR={restRotationR}
         restRotationL={restRotationL}
         wristLimits={wristLimits}

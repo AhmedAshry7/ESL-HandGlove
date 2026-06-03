@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { ArmModel, DEFAULT_WRIST_LIMITS, DEFAULT_ARM_LIMITS, BIOMECHANICAL_LIMITS } from "../components/ArmModel";
 import Image from "next/image";
@@ -202,7 +202,7 @@ function quatFromEuler(x, y, z) {
 function ConvertToThreeSpace(q, hand = 'right') {
   const conf = __imuAxisConfig[hand] || __imuAxisConfig.right;
   let mappedX = q.x, mappedY = q.y, mappedZ = q.z;
-  
+
   // 1. Map components based on user selection
   if (conf.order === 'xyz') { mappedX = q.x; mappedY = q.y; mappedZ = q.z; }
   else if (conf.order === 'xzy') { mappedX = q.x; mappedY = q.z; mappedZ = q.y; }
@@ -219,14 +219,14 @@ function ConvertToThreeSpace(q, hand = 'right') {
   // 2. Parity Check: Ensure the mapping is a valid Right-Handed rotation
   const isSwapped = (conf.order === 'xzy' || conf.order === 'yxz' || conf.order === 'zyx');
   const signFlips = (conf.sX < 0 ? 1 : 0) + (conf.sY < 0 ? 1 : 0) + (conf.sZ < 0 ? 1 : 0);
-  
+
   // If we swapped axes (Det = -1) or flipped an odd number of signs (Det = -1)
   const det = (isSwapped ? -1 : 1) * (signFlips % 2 !== 0 ? -1 : 1);
-  
+
   // If Det == -1, the mapping turned the rotation inside-out (left-handed).
   // Invert W to correct the rotation parity back to Right-Handed for Three.js.
   if (det < 0) {
-      mappedW = -mappedW; 
+    mappedW = -mappedW;
   }
 
   return new THREE.Quaternion(mappedX, mappedY, mappedZ, mappedW).normalize();
@@ -458,11 +458,11 @@ function useGloveWebSocket(ipAddress, onFrame) {
     wsRef.current = socket;
 
     socket.onopen = () => {
-      console.log('[Glove] Connected');
+      //console.log('[Glove] Connected');
       setGloveState(prev => ({ ...prev, connected: true }));
     };
     socket.onclose = () => {
-      console.log('[Glove] Disconnected');
+      //console.log('[Glove] Disconnected');
       setGloveState(prev => ({ ...prev, connected: false }));
       wsRef.current = null;
     };
@@ -471,10 +471,10 @@ function useGloveWebSocket(ipAddress, onFrame) {
     socket.onmessage = async (event) => {
       try {
         //console.log('[Glove] Received:', event);
-        // console.log("Here is the received data:", event.data);
+        // //console.log("Here is the received data:", event.data);
         if (typeof event.data === 'string') {
           const logMsg = event.data;
-          console.log('[Glove] Received string:', logMsg);
+          //console.log('[Glove] Received string:', logMsg);
           setGloveState(prev => {
             const isLeft = logMsg.includes("[LEFT]") || logMsg.includes("[SLAVE]");
             const target = isLeft ? 'left' : 'right';
@@ -598,10 +598,10 @@ function useGloveWebSocket(ipAddress, onFrame) {
           }
 
           if (imuQuat) {
-            console.log(`[IMU R] U[${imuQuat.upperArm.map(v=>v.toFixed(2)).join(',')}] F[${imuQuat.forearm.map(v=>v.toFixed(2)).join(',')}] H[${imuQuat.hand.map(v=>v.toFixed(2)).join(',')}]`);
+            //console.log(`[IMU R] U[${imuQuat.upperArm.map(v => v.toFixed(2)).join(',')}] F[${imuQuat.forearm.map(v => v.toFixed(2)).join(',')}] H[${imuQuat.hand.map(v => v.toFixed(2)).join(',')}]`);
           }
           if (leftImuQuat) {
-            console.log(`[IMU L] U[${leftImuQuat.upperArm.map(v=>v.toFixed(2)).join(',')}] F[${leftImuQuat.forearm.map(v=>v.toFixed(2)).join(',')}] H[${leftImuQuat.hand.map(v=>v.toFixed(2)).join(',')}]`);
+            //console.log(`[IMU L] U[${leftImuQuat.upperArm.map(v => v.toFixed(2)).join(',')}] F[${leftImuQuat.forearm.map(v => v.toFixed(2)).join(',')}] H[${leftImuQuat.hand.map(v => v.toFixed(2)).join(',')}]`);
           }
 
           const rightFloats = [...right.fingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), right.thumbExtra];
@@ -620,7 +620,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
           };
           const iqR = imuQuat ?? imuQuatRef.current;
           const iqL = leftImuQuat ?? leftImuQuatRef.current;
-          
+
           const flat56 = [
             ...rightFloats,
             ...getWXYZ(iqR?.hand),
@@ -1244,15 +1244,14 @@ function CouplingCalibrationUI({
 
 
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
-function Scene({ rigData, restRotationR, restRotationL, wristLimits, armLimits, fingerLimits, onRestPosesLoaded }) {
+const Scene = memo(function Scene({ rigDataRef, restRotationR, restRotationL, wristLimits, armLimits, fingerLimits, onRestPosesLoaded }) {
   return (
     <Canvas camera={{ position: [0, 0.4, 1.9], fov: 40 }} style={{ width: '100%', height: '100%' }}>
       <ambientLight intensity={1.8} />
       <directionalLight position={[5, 10, 5]} intensity={2.5} />
       <pointLight position={[-5, 5, -3]} intensity={0.6} />
       <ArmModel
-        rightHandSensorData={rigData?.right}
-        leftHandSensorData={rigData?.left}
+        rigDataRef={rigDataRef}
         restRotationR={restRotationR}
         restRotationL={restRotationL}
         wristLimits={wristLimits}
@@ -1262,7 +1261,7 @@ function Scene({ rigData, restRotationR, restRotationL, wristLimits, armLimits, 
       />
     </Canvas>
   );
-}
+});
 // ─── Recording modal ──────────────────────────────────────────────────────────
 function RecordingModal({
   signLabel,
@@ -1309,6 +1308,13 @@ function RecordingModal({
 
   const displayFrame = isRecording ? currentFrame : playbackFrame;
   const displayRigData = computeRigFromFrame(displayFrame);
+  const displayRigDataRef = useRef(null);
+  displayRigDataRef.current = displayRigData;
+  const handleRestPosesLoaded = useCallback((poses) => {
+    if (restPosesRef) {
+      restPosesRef.current = poses;
+    }
+  }, [restPosesRef]);
 
   return (
     <div style={rm.overlay}>
@@ -1346,14 +1352,14 @@ function RecordingModal({
             {isRecording ? 'LIVE CAPTURE' : 'PLAYBACK PREVIEW'}
           </div>
           <Scene
-              rigData={displayRigData}
-              restRotationR={restRotationR}
-              restRotationL={restRotationL}
-              wristLimits={wristLimits}
-              armLimits={armLimits}
-              fingerLimits={fingerLimits}
-              onRestPosesLoaded={(poses) => { restPosesRef.current = poses; }}
-            />
+            rigDataRef={displayRigDataRef}
+            restRotationR={restRotationR}
+            restRotationL={restRotationL}
+            wristLimits={wristLimits}
+            armLimits={armLimits}
+            fingerLimits={fingerLimits}
+            onRestPosesLoaded={handleRestPosesLoaded}
+          />
           {!displayFrame && (
             <div style={rm.vpOverlay}>
               <p style={{ fontSize: 13, color: '#4a5568' }}>Waiting for glove connection…</p>
@@ -1420,12 +1426,12 @@ function RecordingModal({
 export default function GloveCapture() {
   const router = useRouter();
 
-  const [espIp, setEspIp] = useState("192.168.1.8");
-  const [ipInput, setIpInput] = useState("192.168.1.8");
+  const [espIp, setEspIp] = useState("192.168.1.17");
+  const [ipInput, setIpInput] = useState("192.168.1.17");
 
   useEffect(() => {
     const saved = localStorage.getItem('espIp');
-    const defaultIp = saved || process.env.NEXT_PUBLIC_ESP_IP || '192.168.1.8';
+    const defaultIp = saved || process.env.NEXT_PUBLIC_ESP_IP || '192.168.1.17';
     setEspIp(defaultIp);
     setIpInput(defaultIp);
   }, []);
@@ -1449,7 +1455,7 @@ export default function GloveCapture() {
     right: Array(16).fill(null),
     left: Array(16).fill(null)
   });
-
+  const latestRigDataRef = useRef(null);
   const handleFrame = useCallback((frame) => {
     if (frame?.source === 'config_knots') {
       setKnotsByAxis(prev => {
@@ -1565,6 +1571,7 @@ export default function GloveCapture() {
   });
 
   const restPosesRef = useRef(null);
+  const handleRestPosesLoaded = useCallback((poses) => { restPosesRef.current = poses; }, []);
   const tareUpperRRef = useRef(new THREE.Quaternion());
   const tareUpperLRef = useRef(new THREE.Quaternion());
   const modelAlignRightRef = useRef(modelAlignRight);
@@ -1601,7 +1608,7 @@ export default function GloveCapture() {
     // 1. Calculate World Tare (Body Facing Direction) via Swing-Twist
     const hwUpAligned = hwUpperWorld.clone().multiply(mAlignUp);
     const delta = hwUpAligned.clone().multiply(upperRestPose.clone().invert());
-    
+
     // Extract pure Y-axis rotation, ignoring strap roll
     let tareQ = new THREE.Quaternion(0, delta.y, 0, delta.w).normalize();
     if (tareQ.lengthSq() < 0.0001) tareQ = new THREE.Quaternion(0, 1, 0, 0);
@@ -1612,21 +1619,21 @@ export default function GloveCapture() {
     // 2. Calculate Local Mount Offset
     // This perfectly absorbs the physical strap crookedness
     const upperMountCorr = hwUpperWorld.clone().invert()
-        .multiply(tareQ)
-        .multiply(upperRestWorld || upperRestPose)
-        .multiply(mAlignUp.clone().invert());
+      .multiply(tareQ)
+      .multiply(upperRestWorld || upperRestPose)
+      .multiply(mAlignUp.clone().invert());
 
     const forearmMountL = upperMountCorr.clone().invert();
     const forearmMountR = hwForearmLocal.clone().invert()
-        .multiply(upperMountCorr).multiply(mAlignUp)
-        .multiply(forearmRestPose)
-        .multiply(mAlignFo.clone().invert());
+      .multiply(upperMountCorr).multiply(mAlignUp)
+      .multiply(forearmRestPose)
+      .multiply(mAlignFo.clone().invert());
 
     const handMountL = forearmMountR.clone().invert();
     const handMountR = hwHandLocal.clone().invert()
-        .multiply(forearmMountR).multiply(mAlignFo)
-        .multiply(handRestPose)
-        .multiply(mAlignHa.clone().invert());
+      .multiply(forearmMountR).multiply(mAlignFo)
+      .multiply(handRestPose)
+      .multiply(mAlignHa.clone().invert());
 
     if (isLeft) {
       mountCorrRef.current.upperL = upperMountCorr;
@@ -1650,7 +1657,7 @@ export default function GloveCapture() {
     const isLeft = calHandRef.current === 'left';
     const imuQuat = isLeft ? frame?.leftImuQuat : frame?.imuQuat;
     const restPosesObj = isLeft ? restPosesRef.current?.left : restPosesRef.current?.right;
-    
+
     if (!imuQuat?.upperArm || !restPosesObj) return;
 
     const handSide = isLeft ? 'left' : 'right';
@@ -1758,7 +1765,7 @@ export default function GloveCapture() {
       // 2. Forearm & Hand: (Relative IMUs don't need Tare)
       const mUpInv = mUp.clone().invert();
       const mFoInv = mFo.clone().invert();
-      
+
       const alFo = mUpInv.multiply(mCorrR.forearmL).multiply(hwFo).multiply(mCorrR.forearmR).multiply(mFo);
       const alHa = mFoInv.multiply(mCorrR.handL).multiply(hwHa).multiply(mCorrR.handR).multiply(mHa);
 
@@ -1790,6 +1797,7 @@ export default function GloveCapture() {
   }, [modelAlignRight, modelAlignLeft, isCalibrated, manualFingersEnable, manualArmsEnable, manualFingers, manualThumbExtra, manualRightArm, manualLeftArm]);
 
   const rigFrame = useMemo(() => computeRigFromFrame(currentFrame), [computeRigFromFrame, currentFrame]);
+  latestRigDataRef.current = rigFrame;
 
   const [user, setUser] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -2483,13 +2491,13 @@ export default function GloveCapture() {
           <div style={s.viewport}>
             <div style={s.viewportLabel}>LIVE PREVIEW</div>
             <Scene
-              rigData={rigFrame}
+              rigDataRef={latestRigDataRef}
               restRotationR={restRotationR}
               restRotationL={restRotationL}
               wristLimits={wristLimits}
               armLimits={armLimits}
               fingerLimits={fingerLimits}
-              onRestPosesLoaded={(poses) => { restPosesRef.current = poses; }}
+              onRestPosesLoaded={handleRestPosesLoaded}
             />
             {!currentFrame && (
               <div style={s.viewportOverlay}>
@@ -2843,7 +2851,7 @@ export default function GloveCapture() {
                             style={{ ...s.calInput, flex: 1 }}
                             value={ipInput}
                             onChange={e => setIpInput(e.target.value)}
-                            placeholder="e.g. 192.168.1.8"
+                            placeholder="e.g. 192.168.1.17"
                           />
                           <button style={s.calBtn} onClick={handleApplyIp}>
                             Connect

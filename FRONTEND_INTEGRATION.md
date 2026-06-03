@@ -9,7 +9,7 @@ In **WiFi Mode**, the ESP32 **Master (Right Hand)** hosts a WebSocket server on 
 ### 🌐 Connecting from the React Frontend (Browser limitations)
 Because the React frontend runs in a standard web browser (Chrome/Edge), it is subject to strict DNS and security rules:
 - **Do NOT rely on `eslglove.local` in the browser**. Modern browsers with "Secure DNS" (DoH) enabled will completely block `.local` resolution. 
-- You must use the direct, raw IP address of the ESP32 (e.g., `ws://192.168.1.8:81`).
+- You must use the direct, raw IP address of the ESP32 (e.g., `ws://192.168.1.17:81`).
 - We highly recommend storing this in your `.env` file as `NEXT_PUBLIC_ESP_IP` rather than hardcoding it into `page.jsx`.
 
 ### ⏱️ Dynamic Telemetry Rate
