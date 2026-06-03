@@ -478,15 +478,15 @@ function FingerAnglesPanel({ frame, calStatus = 0 }) {
   };
 
   return (
-    <div style={fp.wrap}>
-      <div style={fp.header}>
-        <span style={fp.title}>🧮 Finger Angles</span>
+    <div style={{fp.wrap}}>
+      <div style={{fp.header}}>
+        <span style={{fp.title}}>🧮 Finger Angles</span>
         <span style={{ fontSize: 10, color: '#4a5568' }}>° = calibrated · V = raw voltage</span>
       </div>
       {!f ? (
-        <div style={fp.empty}>No glove data yet.</div>
+        <div style={{fp.empty}}>No glove data yet.</div>
       ) : (
-        <div style={fp.body}>
+        <div style={{fp.body}}>
           {FINGER_LABELS.map(({ label, idx }) => {
             const fingerBit = fingerBitMap[idx];
             const isCal = !!(calStatus & (1 << fingerBit));
@@ -495,9 +495,9 @@ function FingerAnglesPanel({ frame, calStatus = 0 }) {
               ? `${val.toFixed(1)}${isCal ? '°' : 'V'}`
               : '—';
             return (
-              <div key={label} style={fp.item}>
-                <span style={fp.label}>{label}</span>
-                <span style={fp.value(isCal)}>{display}</span>
+              <div key={label} style={{fp.item}}>
+                <span style={{fp.label}}>{label}</span>
+                <span style={{fp.value(isCal)}}>{display}</span>
               </div>
             );
           })}
@@ -539,16 +539,16 @@ function IMUDiagnosticsPanel({ diag, imuQuat }) {
   };
 
   return (
-    <div style={d.wrap}>
-      <div style={d.header}>
-        <span style={d.title}>📡 Wrist IMU</span>
-        <span style={d.badge}>{imuQuat ? 'LIVE' : 'NO SIGNAL'}</span>
+    <div style={{d.wrap}}>
+      <div style={{d.header}}>
+        <span style={{d.title}}>📡 Wrist IMU</span>
+        <span style={{d.badge}}>{imuQuat ? 'LIVE' : 'NO SIGNAL'}</span>
       </div>
-      <div style={d.body}>
+      <div style={{d.body}}>
         {/* Quaternion live values */}
         {imuQuat && (
-          <div style={d.row}>
-            <span style={d.key}>Quaternion</span>
+          <div style={{d.row}}>
+            <span style={{d.key}}>Quaternion</span>
             <span style={{ ...d.val, fontSize: 10.5 }}>
               [{imuQuat.map(v => v.toFixed(3)).join(', ')}]
             </span>
@@ -557,32 +557,32 @@ function IMUDiagnosticsPanel({ diag, imuQuat }) {
         {/* Mag stability bar */}
         <div>
           <div style={{ ...d.row, marginBottom: 4 }}>
-            <span style={d.key}>Mag Stability</span>
+            <span style={{d.key}}>Mag Stability</span>
             <span style={{ ...d.val, color: magColor }}>{diag ? `${magPct}%` : '—'}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div style={d.barBg}>
-              <div style={d.barFill(magPct ?? 0, magColor)} />
+            <div style={{d.barBg}}>
+              <div style={{d.barFill(magPct ?? 0, magColor)}} />
             </div>
-            <span style={d.pill(useMag)}>{useMag ? 'MAG ON' : 'MAG OFF'}</span>
+            <span style={{d.pill(useMag)}}>{useMag ? 'MAG ON' : 'MAG OFF'}</span>
           </div>
         </div>
         {/* Drift exposure */}
-        <div style={d.row}>
-          <span style={d.key}>Drift Exposure</span>
+        <div style={{d.row}}>
+          <span style={{d.key}}>Drift Exposure</span>
           <span style={{ ...d.val, color: drift > 5 ? '#f59e0b' : '#e2b96f' }}>
             {diag ? `${drift}s` : '—'}
           </span>
         </div>
         {/* Accel / Mag staleness */}
-        <div style={d.row}>
-          <span style={d.key}>Since Good Accel</span>
+        <div style={{d.row}}>
+          <span style={{d.key}}>Since Good Accel</span>
           <span style={{ ...d.val, color: tAccel > 3 ? '#ef4444' : '#e2b96f' }}>
             {diag ? `${tAccel}s` : '—'}
           </span>
         </div>
-        <div style={d.row}>
-          <span style={d.key}>Since Good Mag</span>
+        <div style={{d.row}}>
+          <span style={{d.key}}>Since Good Mag</span>
           <span style={{ ...d.val, color: tMag > 3 ? '#f59e0b' : '#e2b96f' }}>
             {diag ? `${tMag}s` : '—'}
           </span>
@@ -850,28 +850,28 @@ function RecordingModal({
   const displayRigData = buildRigData(displayFrame);
 
   return (
-    <div style={rm.overlay}>
+    <div className="fixed inset-0 bg-[#050712]/85 backdrop-blur-md flex items-center justify-center z-50 animate-[fadeIn_0.2s_ease] p-6">
       <style>
         {`.close-btn:hover { background: #2e2e51 !important; }`}
       </style>
-      <div style={rm.modal}>
+      <div className="bg-[#0d1020] border border-white/10 rounded-[24px] w-full max-w-[900px] flex flex-col overflow-hidden shadow-[0_32px_80px_rgba(0,0,0,0.7)] animate-[slideUp_0.3s_ease]">
         {/* Header */}
-        <div style={rm.header}>
-          <div style={rm.headerLeft}>
-            <div style={rm.signChip}>
-              <span style={rm.signChipIcon}>✋</span>
-              <span style={rm.signChipText}>{signLabel}</span>
+        <div className="flex justify-between items-center py-4.5 px-6 bg-white/5 border-b border-white/10 shrink-0">
+          <div className="flex items-center gap-3.5">
+            <div className="flex items-center gap-2 py-1.5 px-3.5 bg-[#e2b96f]/10 border border-[#e2b96f]/25 rounded-full">
+              <span className="text-base">✋</span>
+              <span className="text-sm font-semibold text-[#e2b96f]">{signLabel}</span>
             </div>
             {isRecording
-              ? <div style={rm.recBadge}><span className="rec-dot" style={rm.recDot} /> REC · {frameCount} frames</div>
-              : <div style={rm.playBadge}>Playback loop · {frameCount} frames captured</div>
+              ? <div className="flex items-center gap-2 py-1.5 px-3 rounded-full bg-red-500/10 border border-red-500/25 text-red-500 text-xs font-medium"><span className="rec-dot" className="w-2 h-2 rounded-full bg-red-500 inline-block" /> REC · {frameCount} frames</div>
+              : <div className="text-xs text-emerald-400 py-1.5 px-3 bg-emerald-400/10 border border-emerald-400/20 rounded-full">Playback loop · {frameCount} frames captured</div>
             }
           </div>
-          <div style={rm.headerRight}>
-            <span style={rm.durationLabel}>{duration}s</span>
+          <div className="flex">
+            <span className="text-[13px] text-slate-500 flex items-center mr-2.5">{duration}s</span>
             <button
               className="close-btn"
-              style={s.closeBtn}
+              className="w-[34px] h-[34px] rounded-full border-none bg-transparent cursor-pointer text-[13px] text-slate-400 flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
               onClick={onDiscard}
             >
               ✕
@@ -880,13 +880,13 @@ function RecordingModal({
         </div>
 
         {/* Viewport */}
-        <div style={rm.viewport}>
-          <div style={rm.vpLabel}>
+        <div className="relative w-full h-[380px] bg-gradient-to-br from-[#0a0c18] to-[#111827] rounded-[20px] border border-white/5 shadow-[inset_0_0_60px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col">
+          <div className="absolute top-3 left-4 z-10 text-[10px] text-slate-600 tracking-[1.5px] uppercase">
             {isRecording ? 'LIVE CAPTURE' : 'PLAYBACK PREVIEW'}
           </div>
           <Scene rigData={displayRigData} />
           {!displayFrame && (
-            <div style={rm.vpOverlay}>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <p style={{ fontSize: 13, color: '#4a5568' }}>Waiting for glove connection…</p>
             </div>
           )}
@@ -894,49 +894,49 @@ function RecordingModal({
 
         {/* Bottom controls — changes depending on state */}
         {isRecording ? (
-          <div style={rm.controls}>
-            <div style={rm.controlHint}>Perform the sign now — recording in progress</div>
-            <button className="stop-modal-btn" style={rm.stopBtn} onClick={onStop}>
+          <div className="py-4.5 px-6 flex items-center justify-between bg-white/5 border-t border-white/10 shrink-0">
+            <div className="text-[13px] text-slate-600">Perform the sign now — recording in progress</div>
+            <button className="stop-modal-btn" className="flex items-center gap-2 py-3 px-7 bg-red-600 text-white border-none rounded-xl text-sm font-medium cursor-pointer hover:bg-red-500 transition-colors font-sans" onClick={onStop}>
               Stop Recording
             </button>
           </div>
         ) : (
-          <div style={rm.trimSection}>
+          <div className="py-4.5 px-6 bg-white/5 border-t border-white/10 shrink-0">
             {/* Trim sliders */}
-            <div style={rm.trimHeader}>
-              <h3 style={rm.trimTitle}>Trim Sign</h3>
-              <span style={rm.trimMeta}>{trimmedCount} frames selected</span>
+            <div className="flex justify-between items-center mb-3.5">
+              <h3 className="text-sm font-medium text-slate-200">Trim Sign</h3>
+              <span className="text-xs text-slate-500">{trimmedCount} frames selected</span>
             </div>
 
-            <div style={rm.sliders}>
-              <div style={rm.sliderGroup}>
-                <div style={rm.sliderRow}>
-                  <label style={rm.sliderLabel}>Start</label>
-                  <span style={rm.sliderVal}>{trimStart}%</span>
+            <div className="mb-4">
+              <div className="mb-3">
+                <div className="flex justify-between mb-1.5">
+                  <label className="text-xs text-slate-400">Start</label>
+                  <span className="text-xs text-[#e2b96f] font-medium">{trimStart}%</span>
                 </div>
                 <input type="range" min="0" max="100" value={trimStart} style={{ width: '100%' }}
                   onChange={e => setTrimRange([parseInt(e.target.value), trimEnd])} />
               </div>
-              <div style={rm.sliderGroup}>
-                <div style={rm.sliderRow}>
-                  <label style={rm.sliderLabel}>End</label>
-                  <span style={rm.sliderVal}>{trimEnd}%</span>
+              <div className="mb-3">
+                <div className="flex justify-between mb-1.5">
+                  <label className="text-xs text-slate-400">End</label>
+                  <span className="text-xs text-[#e2b96f] font-medium">{trimEnd}%</span>
                 </div>
                 <input type="range" min="0" max="100" value={trimEnd} style={{ width: '100%' }}
                   onChange={e => setTrimRange([trimStart, parseInt(e.target.value)])} />
               </div>
 
               {/* Visual trim bar */}
-              <div style={rm.trimBar}>
+              <div className="h-1.5 bg-[#1a1f35] rounded-full overflow-hidden mt-1 relative">
                 <div style={{ ...rm.trimFill, left: `${trimStart}%`, width: `${trimEnd - trimStart}%` }} />
               </div>
             </div>
 
-            <div style={rm.actionRow}>
-              <button className="discard-btn" style={rm.discardBtn} onClick={onDiscard}>
+            <div className="flex gap-3 justify-end">
+              <button className="discard-btn" className="py-2.5 px-5 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl text-sm font-medium cursor-pointer hover:bg-red-500/20 transition-colors font-sans" onClick={onDiscard}>
                 ✕ Discard
               </button>
-              <button className="save-sign-btn" style={rm.saveSignBtn} onClick={onSave}>
+              <button className="save-sign-btn" className="py-2.5 px-7 bg-emerald-600 text-white border-none rounded-xl text-sm font-medium cursor-pointer hover:bg-emerald-500 transition-colors font-sans" onClick={onSave}>
                 ✓ Save Sign
               </button>
             </div>
@@ -1584,7 +1584,7 @@ export default function GloveCapture() {
   const handleRemoveSign = (idx) => {
     setSigns(prev => prev.filter((_, i) => i !== idx));
   };
-  if (loading) return (<div style={s.page}>
+  if (loading) return (<div className="min-h-screen bg-[#0d0f1a] font-sans text-slate-200 flex flex-col">
     <style>{`        
                           .loader-overlay {
                             position: fixed;
@@ -1619,7 +1619,7 @@ export default function GloveCapture() {
   </div>);
 
   return (
-    <div style={s.page}>
+    <div className="min-h-screen bg-[#0d0f1a] font-sans text-slate-200 flex flex-col">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1647,55 +1647,55 @@ export default function GloveCapture() {
       `}</style>
 
       {/* ── NAV ── */}
-      <nav style={s.nav}>
-        <div style={s.navBrand}>
+      <nav className="flex items-center justify-between px-7 h-[60px] bg-white/5 border-b border-white/5 backdrop-blur-md sticky top-0 z-20">
+        <div className="flex items-center gap-2.5">
           <Image src={logo} alt="Logo" width={44} height={44} style={{ borderRadius: 8 }} />
-          <span style={s.navName}>صوتك</span>
-          <span style={s.navDivider}>|</span>
-          <span style={s.navSub}>Glove Studio</span>
+          <span className="font-serif text-[18px] font-semibold text-white tracking-wide">صوتك</span>
+          <span className="text-white/15 text-base">|</span>
+          <span className="text-[13px] text-slate-400 font-light">Glove Studio</span>
         </div>
-        <div style={s.navRight} ref={dropdownRef}>
-          <button style={s.userPill} onClick={() => setDropdownOpen(o => !o)}>
-            <div style={s.avatar}>{user?.initials}</div>
-            <span style={s.userName}>{user?.username}</span>
-            <span style={s.chevron}>{dropdownOpen ? '▲' : '▼'}</span>
+        <div className="relative" ref={dropdownRef}>
+          <button className="flex items-center gap-[9px] py-1.5 pl-1.5 pr-3 bg-white/5 border border-white/10 rounded-full cursor-pointer" onClick={() => setDropdownOpen(o => !o)}>
+            <div className="w-[30px] h-[30px] rounded-full bg-gradient-to-br from-[#0f3460] to-[#e2b96f] text-[#1a1a2e] flex items-center justify-center text-[11px] font-bold tracking-wide shrink-0">{user?.initials}</div>
+            <span className="text-[13px] font-medium text-slate-200">{user?.username}</span>
+            <span className="text-[10px] text-slate-400">{dropdownOpen ? '▲' : '▼'}</span>
           </button>
           {dropdownOpen && (
-            <div style={s.dropdown}>
-              <div style={s.ddHeader}>
-                <div style={{ ...s.avatar, width: 36, height: 36, fontSize: 13 }}>{user?.initials}</div>
+            <div className="absolute top-[calc(100%+8px)] right-0 bg-[#1a1f35] rounded-2xl shadow-2xl border border-white/10 min-w-[200px] overflow-hidden z-[100] animate-[slideDown_0.15s_ease]">
+              <div className="flex items-center gap-3 py-3.5 px-4 bg-white/5">
+                <div className="w-[30px] h-[30px] rounded-full bg-gradient-to-br from-[#0f3460] to-[#e2b96f] text-[#1a1a2e] flex items-center justify-center text-[11px] font-bold tracking-wide shrink-0" style={{width: 36, height: 36, fontSize: 13 }}>{user?.initials}</div>
                 <div>
-                  <div style={s.ddName}>{user?.username}</div>
-                  <div style={s.ddEmail}>{userEmail}</div>
+                  <div className="text-[13px] font-medium text-slate-200">{user?.username}</div>
+                  <div className="text-[11px] text-slate-500">{userEmail}</div>
                 </div>
               </div>
-              <div style={s.ddDivider} />
-              <button onClick={() => router.push("/")} className="dd-item" style={s.ddItem}>Home</button>
-              <button onClick={() => router.push("/recording")} className="dd-item" style={s.ddItem}>Recording</button>
-              <button onClick={() => router.push("/legacy")} className="dd-item" style={s.ddItem}>Legacy System</button>
-              <button onClick={() => router.push("/models")} className="dd-item" style={s.ddItem}>Models</button>
-              <div style={s.ddDivider} />
-              <button onClick={() => router.push("/login")} className="logout-item" style={{ ...s.ddItem, color: '#ef4444' }}>Sign out →</button>
+              <div className="h-[1px] bg-white/5" />
+              <button onClick={() => router.push("/")} className="dd-item" className="block w-full py-2.5 px-4 bg-transparent border-none text-left text-[13px] text-slate-400 cursor-pointer hover:bg-white/5 transition-colors font-sans">Home</button>
+              <button onClick={() => router.push("/recording")} className="dd-item" className="block w-full py-2.5 px-4 bg-transparent border-none text-left text-[13px] text-slate-400 cursor-pointer hover:bg-white/5 transition-colors font-sans">Recording</button>
+              <button onClick={() => router.push("/legacy")} className="dd-item" className="block w-full py-2.5 px-4 bg-transparent border-none text-left text-[13px] text-slate-400 cursor-pointer hover:bg-white/5 transition-colors font-sans">Legacy System</button>
+              <button onClick={() => router.push("/models")} className="dd-item" className="block w-full py-2.5 px-4 bg-transparent border-none text-left text-[13px] text-slate-400 cursor-pointer hover:bg-white/5 transition-colors font-sans">Models</button>
+              <div className="h-[1px] bg-white/5" />
+              <button onClick={() => router.push("/login")} className="logout-item" className="block w-full py-2.5 px-4 bg-transparent border-none text-left text-[13px] text-slate-400 cursor-pointer hover:bg-white/5 transition-colors font-sans" style={{color: '#ef4444' }}>Sign out →</button>
             </div>
           )}
         </div>
       </nav>
 
       {/* ── BODY ── */}
-      <div style={s.body}>
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-[1fr_minmax(340px,35vw)] gap-[2.5vw] p-[2.5vw] max-w-[96vw] mx-auto w-full">
 
         {/* ── LEFT COL ── */}
-        <div style={s.leftCol}>
-          <div style={s.titleRow}>
+        <div className="flex flex-col gap-[2vw] min-w-0">
+          <div className="flex justify-between items-start">
             <div>
-              <h1 style={s.title}>Glove Data Studio</h1>
-              <p style={s.subtitle}>Capture hand gesture sequences for your submission</p>
+              <h1 className="font-serif text-[26px] font-semibold text-white mb-1">Glove Data Studio</h1>
+              <p className="text-[13px] text-slate-500 font-light">Capture hand gesture sequences for your submission</p>
             </div>
           </div>
 
           {/* Live 3-D preview */}
-          <div style={s.viewport}>
-            <div style={s.viewportLabel}>LIVE PREVIEW</div>
+          <div className="flex-1 min-h-[55vh] h-[60vh] max-h-[72vh] bg-gradient-to-br from-[#0a0c18] to-[#111827] rounded-[20px] border border-white/5 shadow-[inset_0_0_60px_rgba(0,0,0,0.4)] relative">
+            <div className="absolute top-3.5 left-4.5 z-10 text-[11px] font-medium text-slate-600 tracking-wider uppercase">LIVE PREVIEW</div>
             <Scene
               rigData={rigFrame}
               restRotationR={restRotationR}
@@ -1704,18 +1704,18 @@ export default function GloveCapture() {
               fingerLimits={fingerLimits}
             />
             {!currentFrame && (
-              <div style={s.viewportOverlay}>
-                <p style={s.viewportHint}>Waiting for glove connection…</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <p className="text-[13px] text-slate-600">Waiting for glove connection…</p>
               </div>
             )}
           </div>
 
           {/* Control row: always-visible buttons */}
-          <div style={s.controlRow}>
+          <div className="flex gap-3 items-center">
             {/* Tare IMU — always visible, primary action */}
             <button
               className="calib-btn"
-              style={{ ...s.calibBtn, background: 'rgba(96,165,250,0.08)', color: '#60a5fa', borderColor: 'rgba(96,165,250,0.25)' }}
+              className="flex items-center gap-2 py-2.5 px-5 bg-[#e2b96f]/10 text-[#e2b96f] border border-[#e2b96f]/25 rounded-xl text-sm font-medium cursor-pointer hover:bg-[#e2b96f]/20 transition-all font-sans" style={{background: 'rgba(96,165,250,0.08)', color: '#60a5fa', borderColor: 'rgba(96,165,250,0.25)' }}
               onClick={() => runCommand(CMD.TARE_IMU)}
               disabled={!isConnected}
               title="Put your hand flat, then click to set the zero orientation."
@@ -1725,7 +1725,7 @@ export default function GloveCapture() {
             {/* Calibrate toggle */}
             <button
               className="calib-btn"
-              style={s.calibBtn}
+              className="flex items-center gap-2 py-2.5 px-5 bg-[#e2b96f]/10 text-[#e2b96f] border border-[#e2b96f]/25 rounded-xl text-sm font-medium cursor-pointer hover:bg-[#e2b96f]/20 transition-all font-sans"
               onClick={() => setCalibrationOpen(o => !o)}
             >
               Calibrate
@@ -1733,39 +1733,39 @@ export default function GloveCapture() {
             {/* Reconnect button */}
             <button
               className="calib-btn"
-              style={{ ...s.calibBtn, background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.25)' }}
+              className="flex items-center gap-2 py-2.5 px-5 bg-[#e2b96f]/10 text-[#e2b96f] border border-[#e2b96f]/25 rounded-xl text-sm font-medium cursor-pointer hover:bg-[#e2b96f]/20 transition-all font-sans" style={{background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.25)' }}
               onClick={() => gloveFrame?.reconnect?.()}
               title="Force reconnect to the glove"
             >
               Reconnect
             </button>
             {currentFrame && (
-              <div style={s.connectedBadge}>
-                <span style={s.connDot} /> Connected
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> Connected
               </div>
             )}
           </div>
         </div>
 
         {/* ── RIGHT COL ── */}
-        <div style={s.rightCol}>
+        <div className="flex flex-col gap-[1.6vw] min-w-0">
 
           {/* Sign recorder panel */}
-          <div style={s.panel}>
-            <div style={s.panelHeader}>
-              <h3 style={s.panelTitle}>Record a Sign</h3>
-              <p style={s.panelSub}>Type the label, then start recording</p>
+          <div className="bg-white/5 border border-white/10 rounded-[18px] p-5">
+            <div className="mb-4">
+              <h3 className="text-sm font-medium text-slate-200 mb-1">Record a Sign</h3>
+              <p className="text-xs text-slate-500 font-light">Type the label, then start recording</p>
             </div>
 
-            <div style={s.fieldGroup}>
-              <label style={s.label}>Sign label</label>
+            <div className="flex flex-col gap-2 mb-3.5">
+              <label className="text-xs text-slate-400 font-medium">Sign label</label>
               <input
                 type="text"
                 placeholder='e.g. "hello"'
                 value={signInput}
                 onChange={e => setSignInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleStartRecording()}
-                style={s.input}
+                className="py-2.5 px-3.5 rounded-xl border border-white/10 bg-white/5 text-slate-200 text-sm font-sans transition-colors focus:border-[#e2b96f]/50 focus:shadow-[0_0_0_3px_rgba(226,185,111,0.08)] outline-none"
                 onFocus={e => Object.assign(e.target.style, s.inputFocus)}
                 onBlur={e => Object.assign(e.target.style, { borderColor: 'rgba(255,255,255,0.10)', boxShadow: 'none' })}
               />
@@ -1773,7 +1773,7 @@ export default function GloveCapture() {
 
             <button
               className="start-btn"
-              style={{ ...s.startBtn, opacity: signInput.trim() ? 1 : 0.45 }}
+              className="w-full flex items-center justify-center gap-2 p-3 bg-red-600 text-white rounded-xl text-sm font-medium cursor-pointer hover:bg-red-500 transition-colors font-sans" style={{opacity: signInput.trim() ? 1 : 0.45 }}
               onClick={handleStartRecording}
               disabled={!signInput.trim()}
             >
@@ -1783,13 +1783,13 @@ export default function GloveCapture() {
 
 
           {calibrationOpen && (
-            <div style={s.panel}>
-              <div style={s.panelHeader}>
-                <h3 style={s.panelTitle}>⚙ Calibration</h3>
-                <p style={s.panelSub}>Guide the glove through its full calibration workflow</p>
+            <div className="bg-white/5 border border-white/10 rounded-[18px] p-5">
+              <div className="mb-4">
+                <h3 className="text-sm font-medium text-slate-200 mb-1">⚙ Calibration</h3>
+                <p className="text-xs text-slate-500 font-light">Guide the glove through its full calibration workflow</p>
               </div>
 
-              {calError && <div style={s.calError}>{calError}</div>}
+              {calError && <div className="text-[11px] text-red-500 mb-2">{calError}</div>}
 
               {/* NVS load banner */}
               {nvsBannerVisible && (
@@ -1825,18 +1825,17 @@ export default function GloveCapture() {
               {calTab === 'knots' && (
                 <div style={{ marginTop: 12 }}>
                   {/* Dynamic Global Cal */}
-                  <div style={s.calSection}>
-                    <div style={s.calSectionTitle}>⚡ Dynamic Calibration (all fingers at once)</div>
-                    <p style={s.calHint}>Open and close your hand slowly — spread and curl all fingers. System records all 16 sensors simultaneously.</p>
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wide">⚡ Dynamic Calibration (all fingers at once)</div>
+                    <p className="text-[11px] text-slate-500 mb-2">Open and close your hand slowly — spread and curl all fingers. System records all 16 sensors simultaneously.</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                      <label style={s.calLabel}>Duration (s)</label>
+                      <label className="text-[11px] text-slate-400">Duration (s)</label>
                       <input type="number" min="3" max="30" step="1"
-                        style={{ ...s.calInput, width: 60 }} value={dynCalDuration}
+                        className="w-[70px] py-1.5 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-200 text-[11px] focus:outline-none focus:border-[#e2b96f]/50" style={{width: 60 }} value={dynCalDuration}
                         onChange={e => setDynCalDuration(Math.max(3, parseInt(e.target.value, 10) || 8))}
                         disabled={dynCalRecording} />
                     </div>
-                    <button style={{
-                      ...s.calBtn, width: '100%', padding: '10px', fontSize: 13,
+                    <button className="py-2 px-3 bg-[#1a1a2e] text-[#e2b96f] border border-[#e2b96f]/25 rounded-lg text-xs cursor-pointer font-sans hover:bg-[#e2b96f]/10 transition-colors" style={{width: '100%', padding: '10px', fontSize: 13,
                       background: dynCalRecording ? 'rgba(239,68,68,0.15)' : 'rgba(52,211,153,0.12)',
                       color: dynCalRecording ? '#ef4444' : '#34d399',
                       borderColor: dynCalRecording ? 'rgba(239,68,68,0.30)' : 'rgba(52,211,153,0.30)'
@@ -1847,15 +1846,15 @@ export default function GloveCapture() {
                   </div>
 
                   {/* Step-by-step Wizard */}
-                  <div style={s.calSection}>
-                    <div style={s.calSectionTitle}>Step-by-Step Axis Wizard</div>
-                    <div style={s.calRow}>
-                      <label style={s.calLabel}>Finger</label>
-                      <select style={s.calSelect} value={calFinger} onChange={e => { setCalFinger(parseInt(e.target.value, 10)); setSanityWarnings([]); setCaptureConfirm(null); }}>
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wide">Step-by-Step Axis Wizard</div>
+                    <div className="flex items-center flex-wrap gap-2 mb-2.5">
+                      <label className="text-[11px] text-slate-400">Finger</label>
+                      <select className="py-1.5 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-200 text-[11px] focus:outline-none focus:border-[#e2b96f]/50" value={calFinger} onChange={e => { setCalFinger(parseInt(e.target.value, 10)); setSanityWarnings([]); setCaptureConfirm(null); }}>
                         {CAL_FINGER_NAMES.map((name, idx) => <option key={name} value={idx}>{name}</option>)}
                       </select>
-                      <label style={s.calLabel}>Axis</label>
-                      <select style={s.calSelect} value={calAxis} onChange={e => { setCalAxis(parseInt(e.target.value, 10)); setSanityWarnings([]); setCaptureConfirm(null); }}>
+                      <label className="text-[11px] text-slate-400">Axis</label>
+                      <select className="py-1.5 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-200 text-[11px] focus:outline-none focus:border-[#e2b96f]/50" value={calAxis} onChange={e => { setCalAxis(parseInt(e.target.value, 10)); setSanityWarnings([]); setCaptureConfirm(null); }}>
                         {CAL_AXIS_NAMES.map((name, idx) => (
                           <option key={name} value={idx} disabled={CAL_FINGER_DEFAULTS[calFinger][idx] === -1}>{name}</option>
                         ))}
@@ -1893,27 +1892,27 @@ export default function GloveCapture() {
                       </div>
                     )}
                     {/* Steps */}
-                    <div style={s.calSteps}>
+                    <div className="flex flex-col gap-1.5 mb-2.5">
                       {CALIBRATION_STEPS.map((step, idx) => {
                         const value = axisKnots[idx];
                         const done = Number.isFinite(value);
                         const active = idx === nextStepIdx && !captureConfirm;
                         return (
-                          <div key={step.pct} style={{ ...s.calStep, ...(done ? s.calStepDone : null), ...(active ? s.calStepActive : null) }}>
+                          <div key={step.pct} className="flex justify-between py-1.5 px-2 rounded-lg bg-white/5 border border-white/5 text-[11px] text-slate-400" style={{...(done ? s.calStepDone : null), ...(active ? s.calStepActive : null) }}>
                             <span>{step.label}</span>
                             <span>{done ? `${value.toFixed(3)}V` : (active ? '← next' : '---')}</span>
                           </div>
                         );
                       })}
                     </div>
-                    {nextStepIdx !== -1 && !captureConfirm && <p style={s.calHint}>Hold <strong>{CAL_FINGER_NAMES[calFinger]} {CAL_AXIS_NAMES[calAxis]}</strong> at <strong>{CALIBRATION_STEPS[nextStepIdx]?.pct}%</strong> then press Capture.</p>}
-                    <div style={s.calRow}>
-                      <button style={s.calBtn} onClick={captureStep}
+                    {nextStepIdx !== -1 && !captureConfirm && <p className="text-[11px] text-slate-500 mb-2">Hold <strong>{CAL_FINGER_NAMES[calFinger]} {CAL_AXIS_NAMES[calAxis]}</strong> at <strong>{CALIBRATION_STEPS[nextStepIdx]?.pct}%</strong> then press Capture.</p>}
+                    <div className="flex items-center flex-wrap gap-2 mb-2.5">
+                      <button className="py-2 px-3 bg-[#1a1a2e] text-[#e2b96f] border border-[#e2b96f]/25 rounded-lg text-xs cursor-pointer font-sans hover:bg-[#e2b96f]/10 transition-colors" onClick={captureStep}
                         disabled={!isConnected || !axisAvailable || nextStepIdx === -1 || !!captureConfirm}>
                         Capture
                       </button>
-                      <button style={s.calBtnSecondary} onClick={resetAxis}>Reset</button>
-                      <button style={{ ...s.calBtn, opacity: axisComplete ? 1 : 0.5 }} onClick={sendKnots} disabled={!isConnected || !axisComplete}>
+                      <button className="py-2 px-2.5 bg-white/5 text-slate-400 border border-white/10 rounded-lg text-xs cursor-pointer font-sans hover:bg-white/10 transition-colors" onClick={resetAxis}>Reset</button>
+                      <button className="py-2 px-3 bg-[#1a1a2e] text-[#e2b96f] border border-[#e2b96f]/25 rounded-lg text-xs cursor-pointer font-sans hover:bg-[#e2b96f]/10 transition-colors" style={{opacity: axisComplete ? 1 : 0.5 }} onClick={sendKnots} disabled={!isConnected || !axisComplete}>
                         Send Knots
                       </button>
                     </div>
@@ -1924,9 +1923,9 @@ export default function GloveCapture() {
               {/* ── TAB: COUPLING ── */}
               {calTab === 'coupling' && (
                 <div style={{ marginTop: 12 }}>
-                  <div style={s.calSection}>
-                    <div style={s.calSectionTitle}>🔗 Cross-Axis Coupling Compensation</div>
-                    <p style={s.calHint}>Compensates for magnetic interference between adjacent sensors. Set all 4 coefficients per finger then Apply.</p>
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wide">🔗 Cross-Axis Coupling Compensation</div>
+                    <p className="text-[11px] text-slate-500 mb-2">Compensates for magnetic interference between adjacent sensors. Set all 4 coefficients per finger then Apply.</p>
                     <CouplingCalibrationUI
                       couplingByFinger={couplingByFinger}
                       setCouplingByFinger={setCouplingByFinger}
@@ -1948,31 +1947,31 @@ export default function GloveCapture() {
               {calTab === 'manage' && (
                 <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {/* IMU Commands */}
-                  <div style={s.calSection}>
-                    <div style={s.calSectionTitle}>🧭 IMU Commands</div>
-                    <div style={s.calRow}>
-                      <button style={s.calBtnSecondary} onClick={() => runCommand(CMD.START_BOOT_CAL)} disabled={!isConnected}>Boot Cal</button>
-                      <button style={s.calBtnSecondary} onClick={() => runCommand(CMD.START_MAG_CAL)} disabled={!isConnected}>Mag Cal</button>
-                      <button style={s.calBtnSecondary} onClick={() => runCommand(CMD.END_MAG_CAL)} disabled={!isConnected}>End Mag</button>
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wide">🧭 IMU Commands</div>
+                    <div className="flex items-center flex-wrap gap-2 mb-2.5">
+                      <button className="py-2 px-2.5 bg-white/5 text-slate-400 border border-white/10 rounded-lg text-xs cursor-pointer font-sans hover:bg-white/10 transition-colors" onClick={() => runCommand(CMD.START_BOOT_CAL)} disabled={!isConnected}>Boot Cal</button>
+                      <button className="py-2 px-2.5 bg-white/5 text-slate-400 border border-white/10 rounded-lg text-xs cursor-pointer font-sans hover:bg-white/10 transition-colors" onClick={() => runCommand(CMD.START_MAG_CAL)} disabled={!isConnected}>Mag Cal</button>
+                      <button className="py-2 px-2.5 bg-white/5 text-slate-400 border border-white/10 rounded-lg text-xs cursor-pointer font-sans hover:bg-white/10 transition-colors" onClick={() => runCommand(CMD.END_MAG_CAL)} disabled={!isConnected}>End Mag</button>
                     </div>
                   </div>
                   {/* NVS Save/Load */}
-                  <div style={s.calSection}>
-                    <div style={s.calSectionTitle}>NVS Flash</div>
-                    <div style={s.calRow}>
-                      <button style={{ ...s.calBtn, flex: 1 }} onClick={() => runCommand(CMD.SAVE_CAL)} disabled={!isConnected}>Save to Flash</button>
-                      <button style={{ ...s.calBtnSecondary, flex: 1 }} onClick={handleLoadCalNVS} disabled={!isConnected}>Load from Flash</button>
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wide">NVS Flash</div>
+                    <div className="flex items-center flex-wrap gap-2 mb-2.5">
+                      <button className="py-2 px-3 bg-[#1a1a2e] text-[#e2b96f] border border-[#e2b96f]/25 rounded-lg text-xs cursor-pointer font-sans hover:bg-[#e2b96f]/10 transition-colors flex-1" onClick={() => runCommand(CMD.SAVE_CAL)} disabled={!isConnected}>Save to Flash</button>
+                      <button className="py-2 px-2.5 bg-white/5 text-slate-400 border border-white/10 rounded-lg text-xs cursor-pointer font-sans hover:bg-white/10 transition-colors flex-1" onClick={handleLoadCalNVS} disabled={!isConnected}>Load from Flash</button>
                     </div>
                   </div>
                   {/* Export / Import */}
-                  <div style={s.calSection}>
-                    <div style={s.calSectionTitle}>Export / Import JSON</div>
-                    <div style={s.calRow}>
-                      <button style={{ ...s.calBtn, flex: 1 }} onClick={handleExportCal}>Export Cal JSON</button>
-                      <button style={{ ...s.calBtnSecondary, flex: 1 }} onClick={() => importInputRef.current?.click()}>Import Cal JSON</button>
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wide">Export / Import JSON</div>
+                    <div className="flex items-center flex-wrap gap-2 mb-2.5">
+                      <button className="py-2 px-3 bg-[#1a1a2e] text-[#e2b96f] border border-[#e2b96f]/25 rounded-lg text-xs cursor-pointer font-sans hover:bg-[#e2b96f]/10 transition-colors flex-1" onClick={handleExportCal}>Export Cal JSON</button>
+                      <button className="py-2 px-2.5 bg-white/5 text-slate-400 border border-white/10 rounded-lg text-xs cursor-pointer font-sans hover:bg-white/10 transition-colors flex-1" onClick={() => importInputRef.current?.click()}>Import Cal JSON</button>
                       <input ref={importInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportCal} />
                     </div>
-                    <p style={s.calHint}>JSON includes all knots and coupling coefficients. Import sends CMD 0x10 and 0x11 for all axes automatically.</p>
+                    <p className="text-[11px] text-slate-500 mb-2">JSON includes all knots and coupling coefficients. Import sends CMD 0x10 and 0x11 for all axes automatically.</p>
                   </div>
                 </div>
               )}
@@ -1982,33 +1981,33 @@ export default function GloveCapture() {
 
 
           {/* Signs collected */}
-          <div style={s.panel}>
-            <div style={s.panelHeader}>
-              <h3 style={s.panelTitle}>Recorded Signs</h3>
-              <p style={s.panelSub}>{signs.length} sign{signs.length !== 1 ? 's' : ''} in this submission</p>
+          <div className="bg-white/5 border border-white/10 rounded-[18px] p-5">
+            <div className="mb-4">
+              <h3 className="text-sm font-medium text-slate-200 mb-1">Recorded Signs</h3>
+              <p className="text-xs text-slate-500 font-light">{signs.length} sign{signs.length !== 1 ? 's' : ''} in this submission</p>
             </div>
 
             {signs.length === 0 ? (
-              <div style={s.emptySignsBox}>
-                <span style={s.emptySignsIcon}>✋</span>
-                <p style={s.emptySignsText}>No signs yet — record your first one</p>
+              <div className="flex flex-col items-center py-6 px-3 bg-white/5 rounded-xl border border-dashed border-white/10">
+                <span className="text-2xl opacity-30 mb-2">✋</span>
+                <p className="text-xs text-slate-600 text-center">No signs yet — record your first one</p>
               </div>
             ) : (
-              <div style={s.signsList}>
+              <div className="flex flex-col gap-2">
                 {signs.map((sign, idx) => (
-                  <div key={idx} className="sign-tag" style={s.signTag}>
-                    <div style={s.signTagLeft}>
-                      <span style={s.signTagIndex}>{idx + 1}</span>
+                  <div key={idx} className="sign-tag" className="flex items-center justify-between py-2.5 px-3.5 bg-white/5 rounded-xl border border-white/10 transition-colors hover:border-[#e2b96f]/30 group">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-5.5 h-5.5 rounded-full bg-[#e2b96f]/15 text-[#e2b96f] flex items-center justify-center text-[11px] font-bold">{idx + 1}</span>
                       <div>
-                        <div style={s.signTagLabel}>{sign.label}</div>
-                        <div style={s.signTagMeta}>
+                        <div className="text-[13.5px] font-medium text-slate-200">{sign.label}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
                           {sign.frames.length} frames · {(sign.frames.length / 60).toFixed(1)}s
                         </div>
                       </div>
                     </div>
                     <button
                       className="remove-sign"
-                      style={s.removeSign}
+                      className="p-1 px-2 bg-transparent text-red-500 cursor-pointer text-xs opacity-0 group-hover:opacity-100 transition-opacity rounded-md hover:bg-red-500/10"
                       onClick={() => handleRemoveSign(idx)}
                     >
                       ✕
@@ -2020,15 +2019,15 @@ export default function GloveCapture() {
           </div>
 
           {/* Download submission */}
-          <div style={s.panel}>
-            <div style={s.panelHeader}>
-              <h3 style={s.panelTitle}>Download Submission</h3>
-              <p style={s.panelSub}>Download all recorded signs as a JSON file</p>
+          <div className="bg-white/5 border border-white/10 rounded-[18px] p-5">
+            <div className="mb-4">
+              <h3 className="text-sm font-medium text-slate-200 mb-1">Download Submission</h3>
+              <p className="text-xs text-slate-500 font-light">Download all recorded signs as a JSON file</p>
             </div>
 
             <button
               className="upload-btn"
-              style={{ ...s.uploadBtn, opacity: signs.length > 0 ? 1 : 0.4 }}
+              className="w-full p-3 bg-[#1a1a2e] text-[#e2b96f] border border-[#e2b96f]/25 rounded-xl text-sm font-medium cursor-pointer hover:bg-[#e2b96f]/10 transition-colors font-sans tracking-wide" style={{opacity: signs.length > 0 ? 1 : 0.4 }}
               onClick={handleDownload}
               disabled={signs.length === 0}
             >
@@ -2036,12 +2035,12 @@ export default function GloveCapture() {
             </button>
 
             {downloadStatus === 'success' && (
-              <div style={s.successBanner}>
+              <div className="mt-3 py-2.5 px-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-[12.5px] text-emerald-400">
                 Submission downloaded successfully.
               </div>
             )}
             {signs.length === 0 && (
-              <p style={s.disabledNote}>Add at least one sign before downloading.</p>
+              <p className="mt-2.5 text-[11.5px] text-slate-600">Add at least one sign before downloading.</p>
             )}
           </div>
 
