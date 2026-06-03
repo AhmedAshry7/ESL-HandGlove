@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback,memo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { ArmModel, DEFAULT_WRIST_LIMITS, DEFAULT_ARM_LIMITS, BIOMECHANICAL_LIMITS } from "../components/ArmModel";
 import Image from "next/image";
@@ -202,7 +202,7 @@ function quatFromEuler(x, y, z) {
 function ConvertToThreeSpace(q, hand = 'right') {
   const conf = __imuAxisConfig[hand] || __imuAxisConfig.right;
   let mappedX = q.x, mappedY = q.y, mappedZ = q.z;
-  
+
   // 1. Map components based on user selection
   if (conf.order === 'xyz') { mappedX = q.x; mappedY = q.y; mappedZ = q.z; }
   else if (conf.order === 'xzy') { mappedX = q.x; mappedY = q.z; mappedZ = q.y; }
@@ -219,14 +219,14 @@ function ConvertToThreeSpace(q, hand = 'right') {
   // 2. Parity Check: Ensure the mapping is a valid Right-Handed rotation
   const isSwapped = (conf.order === 'xzy' || conf.order === 'yxz' || conf.order === 'zyx');
   const signFlips = (conf.sX < 0 ? 1 : 0) + (conf.sY < 0 ? 1 : 0) + (conf.sZ < 0 ? 1 : 0);
-  
+
   // If we swapped axes (Det = -1) or flipped an odd number of signs (Det = -1)
   const det = (isSwapped ? -1 : 1) * (signFlips % 2 !== 0 ? -1 : 1);
-  
+
   // If Det == -1, the mapping turned the rotation inside-out (left-handed).
   // Invert W to correct the rotation parity back to Right-Handed for Three.js.
   if (det < 0) {
-      mappedW = -mappedW; 
+    mappedW = -mappedW;
   }
 
   return new THREE.Quaternion(mappedX, mappedY, mappedZ, mappedW).normalize();
@@ -597,12 +597,12 @@ function useGloveWebSocket(ipAddress, onFrame) {
             };
           }
 
-          if (imuQuat) {
-            console.log(`[IMU R] U[${imuQuat.upperArm.map(v=>v.toFixed(2)).join(',')}] F[${imuQuat.forearm.map(v=>v.toFixed(2)).join(',')}] H[${imuQuat.hand.map(v=>v.toFixed(2)).join(',')}]`);
-          }
-          if (leftImuQuat) {
-            console.log(`[IMU L] U[${leftImuQuat.upperArm.map(v=>v.toFixed(2)).join(',')}] F[${leftImuQuat.forearm.map(v=>v.toFixed(2)).join(',')}] H[${leftImuQuat.hand.map(v=>v.toFixed(2)).join(',')}]`);
-          }
+          // if (imuQuat) {
+          //   console.log(`[IMU R] U[${imuQuat.upperArm.map(v => v.toFixed(2)).join(',')}] F[${imuQuat.forearm.map(v => v.toFixed(2)).join(',')}] H[${imuQuat.hand.map(v => v.toFixed(2)).join(',')}]`);
+          // }
+          // if (leftImuQuat) {
+          //   console.log(`[IMU L] U[${leftImuQuat.upperArm.map(v => v.toFixed(2)).join(',')}] F[${leftImuQuat.forearm.map(v => v.toFixed(2)).join(',')}] H[${leftImuQuat.hand.map(v => v.toFixed(2)).join(',')}]`);
+          // }
 
           const rightFloats = [...right.fingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), right.thumbExtra];
           const leftFloats = [...left.fingers.flatMap(f => [f.yaw, f.pitch1, f.pitch2]), left.thumbExtra];
@@ -620,7 +620,7 @@ function useGloveWebSocket(ipAddress, onFrame) {
           };
           const iqR = imuQuat ?? imuQuatRef.current;
           const iqL = leftImuQuat ?? leftImuQuatRef.current;
-          
+
           const flat56 = [
             ...rightFloats,
             ...getWXYZ(iqR?.hand),
@@ -1244,15 +1244,14 @@ function CouplingCalibrationUI({
 
 
 // ─── Tiny reusable 3-D scene wrapper ─────────────────────────────────────────
-function Scene({ rigData, restRotationR, restRotationL, wristLimits, armLimits, fingerLimits, onRestPosesLoaded }) {
+const Scene = memo(function Scene({ rigDataRef, restRotationR, restRotationL, wristLimits, armLimits, fingerLimits, onRestPosesLoaded }) {
   return (
     <Canvas camera={{ position: [0, 0.4, 1.9], fov: 40 }} style={{ width: '100%', height: '100%' }}>
       <ambientLight intensity={1.8} />
       <directionalLight position={[5, 10, 5]} intensity={2.5} />
       <pointLight position={[-5, 5, -3]} intensity={0.6} />
       <ArmModel
-        rightHandSensorData={rigData?.right}
-        leftHandSensorData={rigData?.left}
+        rigDataRef={rigDataRef}
         restRotationR={restRotationR}
         restRotationL={restRotationL}
         wristLimits={wristLimits}
@@ -1262,7 +1261,7 @@ function Scene({ rigData, restRotationR, restRotationL, wristLimits, armLimits, 
       />
     </Canvas>
   );
-}
+});
 // ─── Recording modal ──────────────────────────────────────────────────────────
 function RecordingModal({
   signLabel,
@@ -1309,6 +1308,13 @@ function RecordingModal({
 
   const displayFrame = isRecording ? currentFrame : playbackFrame;
   const displayRigData = computeRigFromFrame(displayFrame);
+  const displayRigDataRef = useRef(null);
+  displayRigDataRef.current = displayRigData;
+  const handleRestPosesLoaded = useCallback((poses)=>{
+    if(restPosesRef){
+      restPosesRef.current = poses;
+    }
+  },[restPosesRef]);
 
   return (
     <div style={rm.overlay}>
@@ -1346,14 +1352,15 @@ function RecordingModal({
             {isRecording ? 'LIVE CAPTURE' : 'PLAYBACK PREVIEW'}
           </div>
           <Scene
-              rigData={displayRigData}
-              restRotationR={restRotationR}
-              restRotationL={restRotationL}
-              wristLimits={wristLimits}
-              armLimits={armLimits}
-              fingerLimits={fingerLimits}
-              onRestPosesLoaded={(poses) => { restPosesRef.current = poses; }}
-            />
+            rigDataRef={displayRigDataRef}
+            restRotationR={restRotationR}
+            restRotationL={restRotationL}
+            wristLimits={wristLimits}
+            armLimits={armLimits}
+            fingerLimits={fingerLimits}
+            //onRestPosesLoaded={(poses) => { restPosesRef.current = poses; }}
+            onRestPosesLoaded={handleRestPosesLoaded}
+          />
           {!displayFrame && (
             <div style={rm.vpOverlay}>
               <p style={{ fontSize: 13, color: '#4a5568' }}>Waiting for glove connection…</p>
@@ -1393,11 +1400,6 @@ function RecordingModal({
                 </div>
                 <input type="range" min="0" max="100" value={trimEnd} style={{ width: '100%' }}
                   onChange={e => setTrimRange([trimStart, parseInt(e.target.value)])} />
-              </div>
-
-              {/* Visual trim bar */}
-              <div style={rm.trimBar}>
-                <div style={{ ...rm.trimFill, left: `${trimStart}%`, width: `${trimEnd - trimStart}%` }} />
               </div>
             </div>
 
@@ -1449,7 +1451,7 @@ export default function GloveCapture() {
     right: Array(16).fill(null),
     left: Array(16).fill(null)
   });
-
+  const latestRigDataRef = useRef(null);
   const handleFrame = useCallback((frame) => {
     if (frame?.source === 'config_knots') {
       setKnotsByAxis(prev => {
@@ -1565,6 +1567,7 @@ export default function GloveCapture() {
   });
 
   const restPosesRef = useRef(null);
+  const handleRestPosesLoaded = useCallback((poses)=>{restPosesRef.current = poses;},[]);
   const tareUpperRRef = useRef(new THREE.Quaternion());
   const tareUpperLRef = useRef(new THREE.Quaternion());
   const modelAlignRightRef = useRef(modelAlignRight);
@@ -1601,7 +1604,7 @@ export default function GloveCapture() {
     // 1. Calculate World Tare (Body Facing Direction) via Swing-Twist
     const hwUpAligned = hwUpperWorld.clone().multiply(mAlignUp);
     const delta = hwUpAligned.clone().multiply(upperRestPose.clone().invert());
-    
+
     // Extract pure Y-axis rotation, ignoring strap roll
     let tareQ = new THREE.Quaternion(0, delta.y, 0, delta.w).normalize();
     if (tareQ.lengthSq() < 0.0001) tareQ = new THREE.Quaternion(0, 1, 0, 0);
@@ -1612,21 +1615,21 @@ export default function GloveCapture() {
     // 2. Calculate Local Mount Offset
     // This perfectly absorbs the physical strap crookedness
     const upperMountCorr = hwUpperWorld.clone().invert()
-        .multiply(tareQ)
-        .multiply(upperRestWorld || upperRestPose)
-        .multiply(mAlignUp.clone().invert());
+      .multiply(tareQ)
+      .multiply(upperRestWorld || upperRestPose)
+      .multiply(mAlignUp.clone().invert());
 
     const forearmMountL = upperMountCorr.clone().invert();
     const forearmMountR = hwForearmLocal.clone().invert()
-        .multiply(upperMountCorr).multiply(mAlignUp)
-        .multiply(forearmRestPose)
-        .multiply(mAlignFo.clone().invert());
+      .multiply(upperMountCorr).multiply(mAlignUp)
+      .multiply(forearmRestPose)
+      .multiply(mAlignFo.clone().invert());
 
     const handMountL = forearmMountR.clone().invert();
     const handMountR = hwHandLocal.clone().invert()
-        .multiply(forearmMountR).multiply(mAlignFo)
-        .multiply(handRestPose)
-        .multiply(mAlignHa.clone().invert());
+      .multiply(forearmMountR).multiply(mAlignFo)
+      .multiply(handRestPose)
+      .multiply(mAlignHa.clone().invert());
 
     if (isLeft) {
       mountCorrRef.current.upperL = upperMountCorr;
@@ -1650,7 +1653,7 @@ export default function GloveCapture() {
     const isLeft = calHandRef.current === 'left';
     const imuQuat = isLeft ? frame?.leftImuQuat : frame?.imuQuat;
     const restPosesObj = isLeft ? restPosesRef.current?.left : restPosesRef.current?.right;
-    
+
     if (!imuQuat?.upperArm || !restPosesObj) return;
 
     const handSide = isLeft ? 'left' : 'right';
@@ -1758,7 +1761,7 @@ export default function GloveCapture() {
       // 2. Forearm & Hand: (Relative IMUs don't need Tare)
       const mUpInv = mUp.clone().invert();
       const mFoInv = mFo.clone().invert();
-      
+
       const alFo = mUpInv.multiply(mCorrR.forearmL).multiply(hwFo).multiply(mCorrR.forearmR).multiply(mFo);
       const alHa = mFoInv.multiply(mCorrR.handL).multiply(hwHa).multiply(mCorrR.handR).multiply(mHa);
 
@@ -1790,7 +1793,7 @@ export default function GloveCapture() {
   }, [modelAlignRight, modelAlignLeft, isCalibrated, manualFingersEnable, manualArmsEnable, manualFingers, manualThumbExtra, manualRightArm, manualLeftArm]);
 
   const rigFrame = useMemo(() => computeRigFromFrame(currentFrame), [computeRigFromFrame, currentFrame]);
-
+  latestRigDataRef.current = rigFrame;
   const [user, setUser] = useState(null);
   const [userId, setUserId] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
@@ -2319,7 +2322,31 @@ export default function GloveCapture() {
     const trimmedFrames = recordedFrames.slice(startIdx, endIdx);
     setSigns(prev => [...prev, {
       label: signLabel,
-      frames: trimmedFrames.map(f => [f.timestamp, ...(f.flat56 || [])]),
+      frames: trimmedFrames.map(f => {
+        // Recompute the visual rig data for this frame
+        const rig = computeRigFromFrame(f);
+
+        const getWXYZ = (qArr) => {
+          if (!qArr || qArr.length !== 4 || qArr.some(isNaN)) return [1.0, 0.0, 0.0, 0.0];
+          return [qArr[3], qArr[0], qArr[1], qArr[2]]; // Convert [x,y,z,w] to [w,x,y,z]
+        };
+
+        const rPalm = rig?.right?.palm || {};
+        const lPalm = rig?.left?.palm || {};
+
+        const flat56_calibrated = [
+          ...(f.fingers || Array(16).fill(0)),
+          ...getWXYZ(rPalm.hand),
+          ...getWXYZ(rPalm.forearm),
+          ...getWXYZ(rPalm.upperArm),
+          ...(f.leftFingerAnglesFlat || Array(16).fill(0)),
+          ...getWXYZ(lPalm.hand),
+          ...getWXYZ(lPalm.forearm),
+          ...getWXYZ(lPalm.upperArm),
+        ];
+
+        return [f.timestamp, ...flat56_calibrated];
+      }),
     }]);
 
     setModalOpen(false);
@@ -2483,13 +2510,15 @@ export default function GloveCapture() {
           <div style={s.viewport}>
             <div style={s.viewportLabel}>LIVE PREVIEW</div>
             <Scene
-              rigData={rigFrame}
+              //rigData={rigFrame}
+              rigDataRef = {latestRigDataRef}
               restRotationR={restRotationR}
               restRotationL={restRotationL}
               wristLimits={wristLimits}
               armLimits={armLimits}
               fingerLimits={fingerLimits}
-              onRestPosesLoaded={(poses) => { restPosesRef.current = poses; }}
+              //onRestPosesLoaded={(poses) => { restPosesRef.current = poses; }}
+              onRestPosesLoaded={handleRestPosesLoaded}
             />
             {!currentFrame && (
               <div style={s.viewportOverlay}>
@@ -3470,7 +3499,7 @@ const rm = {
   sliderLabel: { fontSize: 12, color: '#a0aec0' },
   sliderVal: { fontSize: 12, color: '#e2b96f', fontWeight: 500 },
   trimBar: { height: 6, background: '#1a1f35', borderRadius: 6, overflow: 'hidden', marginTop: 4 },
-  trimFill: { position: 'absolute', height: '100%', background: 'linear-gradient(90deg, #0f3460, #e2b96f)', borderRadius: 6 },
+  trimFill: { position: 'absolute', height: '1%', background: 'linear-gradient(90deg, #0f3460, #e2b96f)', borderRadius: 6 },
 
   actionRow: { display: 'flex', gap: 12, justifyContent: 'flex-end' },
   discardBtn: { padding: '11px 22px', background: 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.20)', borderRadius: 12, fontSize: 14, fontWeight: 500, cursor: 'pointer', transition: 'background 0.15s, color 0.15s', fontFamily: "'DM Sans', sans-serif" },

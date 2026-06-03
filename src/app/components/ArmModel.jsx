@@ -273,8 +273,9 @@ function applyBoneEuler(node, eulerArray) {
 }
 
 export function CombinedArmRig({
-  leftHandSensorData,
-  rightHandSensorData,
+  //leftHandSensorData,
+  //rightHandSensorData,
+  rigDataRef,
   restRotationR = [3.15, 2.29, 3.15],
   restRotationL = [3.15, -2.29, 3.15],
   // Biomechanical constraints — pass null/undefined to disable clamping
@@ -385,7 +386,8 @@ export function CombinedArmRig({
 
   useFrame(() => {
     if (!nodes) return;
-
+    const rightHandSensorData = rigDataRef?.current?.right;
+    const leftHandSensorData = rigDataRef?.current?.left;
     // ── RIGHT ARM BONES ──────────────────────────────────────
     const forceZero = rightHandSensorData?.palm?.forceZeroPose || false;
 
@@ -540,8 +542,9 @@ export function CombinedArmRig({
 }
 
 export function ArmModel({
-  leftHandSensorData,
-  rightHandSensorData,
+  //leftHandSensorData,
+  //rightHandSensorData,
+  rigDataRef,
   restRotationR,
   restRotationL,
   wristLimits,
@@ -551,8 +554,9 @@ export function ArmModel({
   return (
     <group>
       <CombinedArmRig
-        leftHandSensorData={leftHandSensorData}
-        rightHandSensorData={rightHandSensorData}
+        //leftHandSensorData={leftHandSensorData}
+        //rightHandSensorData={rightHandSensorData}
+        rigDataRef={rigDataRef}
         restRotationR={restRotationR}
         restRotationL={restRotationL}
         wristLimits={wristLimits}
